@@ -1,0 +1,28 @@
+<launch>
+	<!-- 单机 -->
+	<!-- 启动MAVROS -->
+	<!-- 不同机载电脑,注意修改fcu_url至正确的端口号及波特率 -->
+	<arg name="serial_port" default="/dev/ttyACM0"/>
+	<arg name="gcs_ip" default="192.168.1.101"/>
+
+	<group ns="uav1">
+		<node pkg="mavros" type="mavros_node" name="mavros" output="screen">
+			<param name="fcu_url" value="$(arg serial_port):57600" />
+			<param name="gcs_url" value="udp://:14560@$(arg gcs_ip):14550"/>
+			<!-- <param name="gcs_url" value="udp://:14560@localhost:14550" /> -->
+			<param name="target_system_id" value="1" />
+			<param name="target_component_id" value="1" />
+			<param name="fcu_protocol" value="v2.0" />
+
+			<!-- load blacklist, config -->
+			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_pluginlists.yaml" />
+			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_config.yaml" />
+		</node>
+	</group>
+
+	<!-- run the rosbag.cpp -->
+	<!-- <node pkg="rosbag" type="record" name="bag_record" output="screen" 
+		args = "/uav1/prometheus/drone_state -o subset">	
+	</node>	 -->
+</launch>
+

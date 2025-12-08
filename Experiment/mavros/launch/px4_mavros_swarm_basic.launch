@@ -1,0 +1,21 @@
+<launch>
+    <arg name="uav_id" default="1"/>
+	<arg name="serial_port" default="/dev/ttyACM0"/>
+	<arg name="gcs_ip" default="192.168.1.70"/>
+    
+	<!-- 无人机编号（PX4内部参数） 	MAV_SYS_ID 从1开始，对应uav_id--> 
+    <!-- n号飞机 -->
+	<arg name="uav_name" default="$(eval 'uav' + str(arg('uav_id')))"/>
+    <group ns="$(arg uav_name)">
+		<!-- 启动MAVROS -->
+		<node pkg="mavros" type="mavros_node" name="mavros" output="screen">
+			<param name="fcu_url" value="$(arg serial_port):57600"/>
+			<param name="gcs_url" value="$(eval 'udp://:' + str(14559 + arg('uav_id')) + '@' + arg('gcs_ip') + ':' + str(14549 + arg('uav_id')))"/>
+			<param name="target_system_id" value="$(arg uav_id)"/>
+			<param name="target_component_id" value="1" />
+			<param name="fcu_protocol" value="v2.0" />
+			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_pluginlists.yaml" />
+			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_config.yaml" />
+		</node>
+    </group>
+</launch>

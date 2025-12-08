@@ -1,0 +1,10 @@
+build/
+devel/
+Modules/ego_planner/src/uav_simulator/lidarmap_generator/resource
+
+__pycache__
+_ext
+*.pyc
+*.so
+nano.save
+.catkin_workspace
