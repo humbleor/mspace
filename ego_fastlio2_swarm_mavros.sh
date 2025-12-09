@@ -5,8 +5,8 @@ set -e
 export DISABLE_ROS1_EOL_WARNINGS=1
 
 source /opt/ros/noetic/setup.bash
-source /home/joey/workspace/ws_livox/devel/setup.bash
-source /home/joey/workspace/mspace/devel/setup.bash
+source ~/workspace/ws_livox/devel/setup.bash
+source ~/workspace/mspace/devel/setup.bash
 
 # 集群配置
 UAV1_IP="192.168.1.50"  # joey
@@ -141,8 +141,8 @@ start_uav2() {
     sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no ${UAV2_HOSTNAME}@${UAV2_IP} "
         set -e
         source /opt/ros/noetic/setup.bash
-        source /home/mspace/workspace/ws_livox/devel/setup.bash
-        source /home/mspace/workspace/mspace/devel/setup.bash
+        source ~/workspace/ws_livox/devel/setup.bash
+        source ~/workspace/mspace/devel/setup.bash
 
         export ROS_MASTER_URI=\"${ROS_MASTER_URI}\"
         export ROS_IP=\"${UAV2_IP}\"

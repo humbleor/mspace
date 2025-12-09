@@ -2,8 +2,8 @@
 
 export DISABLE_ROS1_EOL_WARNINGS=1
 source /opt/ros/noetic/setup.bash
-source /home/joey/workspace/ws_livox/devel/setup.bash
-source /home/joey/workspace/mspace/devel/setup.bash
+source ~/workspace/ws_livox/devel/setup.bash
+source ~/workspace/mspace/devel/setup.bash
 
 gnome-terminal \
 --window -e 'bash -c "roslaunch mavros_bringup px4_mavros.launch; exec bash"' \

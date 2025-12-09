@@ -1,3 +1,5 @@
+#!/bin/bash
+
 catkin_make --source Experiment/mavros --build build/mavros_bringup
 catkin_make --source Modules/common/msgs --build build/msgs
 catkin_make --source Modules/fast_lio2 --build build/fast_lio2

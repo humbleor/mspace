@@ -1,12 +1,12 @@
 #!/bin/bash
 
-cd /home/joey/data
+cd ~/data
 
-if [ ! -d "/home/joey/data" ]; then
-    mkdir -p /home/joey/data
+if [ ! -d "~/data" ]; then
+    mkdir -p ~/data
 fi
 
-rosbag record -b 1024 /ouster/imu /ouster/points /livox/lidar_192_168_2_181 /livox/imu_192_168_2_181 /camera/color/image_raw/compressed /d400/color/image_raw/compressed
+rosbag record -b 1024 --regex /ouster/imu /ouster/points /livox/lidar_.* /livox/imu_.* /camera/color/image_raw/compressed /d400/color/image_raw/compressed
 
 # file="/home/joey/data/full_$(date +%Y%m%d-%H%M%S).bag"
 # rosbag record -a -b 1024 -O "$file"
