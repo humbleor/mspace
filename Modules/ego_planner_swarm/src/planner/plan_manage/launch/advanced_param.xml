@@ -39,23 +39,23 @@
 
   <arg name="obj_num_set"/>
 
-  <arg name="drone_id"/>
+  <arg name="uav_id"/>
 
 
   <!-- main node -->
   <!-- <node pkg="ego_planner" name="ego_planner_node" type="ego_planner_node" output="screen" launch-prefix="valgrind"> -->
-  <node pkg="ego_planner" name="drone_$(arg drone_id)_ego_planner_node" type="ego_planner_node" output="screen">
+  <node pkg="ego_planner" name="uav_$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen">
   
-    <remap from="~odom_world" to="/drone_$(arg drone_id)_$(arg odometry_topic)"/>
-    <remap from="~planning/bspline" to = "/drone_$(arg drone_id)_planning/bspline"/>
-    <remap from="~planning/data_display" to = "/drone_$(arg drone_id)_planning/data_display"/>
+    <remap from="~odom_world" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
+    <remap from="~planning/bspline" to = "/uav$(arg uav_id)/planning/bspline"/>
+    <remap from="~planning/data_display" to = "/uav$(arg uav_id)/planning/data_display"/>
     <remap from="~planning/broadcast_bspline_from_planner" to = "/broadcast_bspline"/>
     <remap from="~planning/broadcast_bspline_to_planner" to = "/broadcast_bspline"/>
 
-    <remap from="~grid_map/odom" to="/drone_$(arg drone_id)_$(arg odometry_topic)"/>
-    <remap from="~grid_map/cloud" to="/drone_$(arg drone_id)_$(arg cloud_topic)"/>
-    <remap from="~grid_map/pose"   to = "/drone_$(arg drone_id)_$(arg camera_pose_topic)"/> 
-    <remap from="~grid_map/depth" to = "/drone_$(arg drone_id)_$(arg depth_topic)"/>
+    <remap from="~grid_map/odom" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
+    <remap from="~grid_map/cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+    <remap from="~grid_map/pose"   to = "/uav$(arg uav_id)/$(arg camera_pose_topic)"/> 
+    <remap from="~grid_map/depth" to = "/uav$(arg uav_id)/$(arg depth_topic)"/>
     
 
     <!-- planning fsm -->
@@ -131,7 +131,7 @@
     <param name="manager/feasibility_tolerance" value="0.05" type="double"/>
     <param name="manager/planning_horizon" value="$(arg planning_horizon)" type="double"/>
     <param name="manager/use_distinctive_trajs" value="$(arg use_distinctive_trajs)" type="bool"/>
-    <param name="manager/drone_id" value="$(arg drone_id)"/>
+    <param name="manager/drone_id" value="$(arg uav_id)"/>
 
   <!-- trajectory optimization -->
     <param name="optimization/lambda_smooth" value="1.0" type="double"/>

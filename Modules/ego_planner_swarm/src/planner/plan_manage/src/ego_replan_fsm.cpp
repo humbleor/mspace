@@ -164,6 +164,7 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
+    sleep(45);
   }
 
   int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 

@@ -11,7 +11,7 @@
 	<param name="cube_side_length" type="double" value="1000" />
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
 
-	<remap from="/drone_cloud_bizhang" to="/uav$(arg uav_id)/mid360_lidar_point"/>
+	<remap from="/drone_cloud_bizhang" to="/uav$(arg uav_id)/drone_cloud_bizhang"/>
 
     <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen" /> 
 
