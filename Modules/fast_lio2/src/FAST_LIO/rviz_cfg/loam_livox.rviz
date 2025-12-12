@@ -96,7 +96,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.05000000074505806
           Style: Points
-          Topic: /uav1/mid360_lidar_point
+          Topic: /uav1/drone_cloud_bizhang
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true

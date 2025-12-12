@@ -10,7 +10,7 @@ gnome-terminal \
 --tab -e 'bash -c "sleep 5; roslaunch livox_ros_driver2 msg_MID360.launch; exec bash"' \
 --tab -e 'bash -c "sleep 15; roslaunch fast_lio mapping_mid360.launch; exec bash"' \
 --tab -e 'bash -c "sleep 10; roslaunch prometheus_swarm_control ego_swarm_control.launch; exec bash"' \
---tab -e 'bash -c "sleep 10; roslaunch ego_planner osfastlio2_simdemo.launch; exec bash"' \
+--tab -e 'bash -c "sleep 10; roslaunch ego_planner osfastlio2_run.launch; exec bash"' \
 --tab -e 'bash -c "sleep 15; roslaunch prometheus_swarm_control ego_station.launch; exec bash"' \
 --tab -e 'bash -c "sleep 5; roslaunch realsense2_camera rs_camera.launch; exec bash"'
 

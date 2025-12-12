@@ -1,7 +1,7 @@
 <launch>
     <!-- number of moving objects -->
     <arg name="obj_num" value="10" />
-    <arg name="drone_id" value="0"/>
+    <arg name="uav_id" value="1"/>
 
     <arg name="map_size_x" value="50.0"/>
     <arg name="map_size_y" value="25.0"/>
@@ -32,7 +32,7 @@
 
     <!-- main algorithm params -->
     <include file="$(find ego_planner)/launch/advanced_param.xml">
-        <arg name="drone_id" value="$(arg drone_id)"/>
+        <arg name="uav_id" value="$(arg uav_id)"/>
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
         <arg name="map_size_y_" value="$(arg map_size_y)"/>
         <arg name="map_size_z_" value="$(arg map_size_z)"/>
@@ -80,14 +80,14 @@
         <arg name="point4_z" value="1.0" />
     </include>
     <!-- trajectory server -->
-    <node pkg="ego_planner" name="drone_$(arg drone_id)_traj_server" type="traj_server" output="screen">
-        <remap from="position_cmd" to="drone_$(arg drone_id)_planning/pos_cmd"/>
-        <remap from="~planning/bspline" to="drone_$(arg drone_id)_planning/bspline"/>
+    <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen">
+        <remap from="position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+        <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
         <param name="traj_server/time_forward" value="1.0" type="double"/>
     </node>
     <!-- use simulator -->
     <include file="$(find ego_planner)/launch/simulator.xml">
-        <arg name="drone_id" value="$(arg drone_id)"/>
+        <arg name="uav_id" value="$(arg uav_id)"/>
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
         <arg name="map_size_y_" value="$(arg map_size_y)"/>
         <arg name="map_size_z_" value="$(arg map_size_z)"/>
@@ -96,4 +96,6 @@
         <arg name="init_z_" value="0.1"/>
         <arg name="odometry_topic" value="$(arg odom_topic)" />
     </include>
+
+    <include file="$(find ego_planner)/launch/rviz.launch"/>
 </launch>
