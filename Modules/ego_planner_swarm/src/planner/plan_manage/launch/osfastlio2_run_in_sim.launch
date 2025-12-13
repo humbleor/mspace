@@ -1,10 +1,10 @@
 <launch>
   <!-- size of map, change the size inflate x, y, z according to your application -->
   <arg name="map_size_x" value="50.0"/>
-  <arg name="map_size_y" value="25.0"/>
+  <arg name="map_size_y" value="50.0"/>
   <arg name="map_size_z" value="10.0"/>
 
-  <arg name="init_x" value="-20.0"/>
+  <arg name="init_x" value="0.0"/>
   <arg name="init_y" value="0.0"/>
   <arg name="init_z" value="0.1"/>
 
@@ -16,10 +16,12 @@
   <!-- number of moving objects -->
   <arg name="obj_num" value="10" />
 
+  <include file="$(find ego_planner)/launch/rviz.launch"/>
+
   <!-- map -->
   <node pkg ="map_generator" name ="random_forest" type ="random_forest" output = "screen">    
-      <param name="map/x_size"     value="36" />
-      <param name="map/y_size"     value="20" />
+      <param name="map/x_size"     value="50" />
+      <param name="map/y_size"     value="50" />
       <param name="map/z_size"     value="3" />
       <param name="map/resolution" value="0.1"/>
       <param name="ObstacleShape/seed" value="1"/>
@@ -51,14 +53,14 @@
     <!-- 路径点生成参数 -->
     <arg name="box_min_x" value="0.0"/>
     <arg name="box_min_y" value="0.0"/>
-    <arg name="box_min_z" value="0.0"/>
+    <arg name="box_min_z" value="2.0"/>
     <arg name="box_max_x" value="10.0"/>
     <arg name="box_max_y" value="10.0"/>
-    <arg name="box_max_z" value="2.0"/>
+    <arg name="box_max_z" value="3.0"/>
 
     <arg name="step_X" value="3.0"/>
     <arg name="step_Y" value="3.0"/>
-    <arg name="step_Z" value="1.0"/>
+    <arg name="step_Z" value="2.0"/>
 
     <!-- waypointDistribution flag 0:水平遍历fly, 1表示垂直fly, 2表示螺旋式fly,针对单颗树木-->
     <arg name="waypointDistriFlag" value="0"/>
@@ -103,7 +105,8 @@
 
     <!-- 1: use 2D Nav Goal to select goal  -->
     <!-- 2: use global waypoints below  -->
-    <arg name="flight_type" value="2" />
+    <!-- 3: use waypointDistriFlag to generate waypoints  -->
+    <arg name="flight_type" value="3" />
 
   </include>
 
@@ -115,29 +118,23 @@
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>
 
-  <!--node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+  <!-- <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
     <remap from="~odom" to="$(arg odom_topic)"/>        
     <remap from="~goal" to="/move_base_simple/goal"/>
     <remap from="~traj_start_trigger" to="/traj_start_trigger" />
     <param name="waypoint_type" value="manual-lonely-waypoint"/>    
-  </node-->
+  </node> -->
 
   <!-- use simulator -->
   <include file="$(find ego_planner)/launch/simulator.xml">
-
     <arg name="uav_id" value="$(arg uav_id)"/>
-
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
-
     <arg name="init_x_" value="$(arg init_x)"/>
     <arg name="init_y_" value="$(arg init_y)"/>
     <arg name="init_z_" value="$(arg init_z)"/>
-
     <arg name="odometry_topic" value="$(arg odom_topic)" />
   </include>
-
-  <include file="$(find ego_planner)/launch/rviz.launch"/>
 
 </launch>

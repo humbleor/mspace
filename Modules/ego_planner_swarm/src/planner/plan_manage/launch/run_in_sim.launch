@@ -87,8 +87,8 @@
 
   <!-- trajectory server -->
   <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen">
-    <remap from="position_cmd" to="uav_$(arg uav_id)_planning/pos_cmd"/>
-    <remap from="~planning/bspline" to="uav_$(arg uav_id)_planning/bspline"/>
+    <remap from="position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+    <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
 
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>

@@ -12,12 +12,12 @@ namespace ego_planner
     have_odom_ = false;
     have_recv_pre_agent_ = false;
 
-    // 目标点类型：1，手动设定目标点；2，预设目标点
+    // 目标点类型：1，手动设定目标点；2，预设目标点；3，生成目标点
     nh.param("fsm/flight_type", target_type_, -1);
     // 重规划时间间隔
     nh.param("fsm/thresh_replan_time", replan_thresh_, -1.0);
     // 与目标距离小于该参数时，停止规划
-    nh.param("fsm/thresh_no_replan_meter", no_replan_thresh_, -1.0);
+    nh.param("fsm/thresh_no_replan_meter", no_replan_thresh_, 0.5); //-1.0
     // 规划范围
     nh.param("fsm/planning_horizon", planning_horizen_, -1.0);
     // 紧急停止时间
@@ -30,12 +30,6 @@ namespace ego_planner
     have_trigger_ = !flag_realworld_experiment_;
     // 读取waypoint
     nh.param("fsm/waypoint_num", waypoint_num_, -1);
-    // for (int i = 0; i < waypoint_num_; i++)
-    // {
-    //   nh.param("fsm/waypoint" + to_string(i) + "_x", waypoints_[i][0], -1.0);
-    //   nh.param("fsm/waypoint" + to_string(i) + "_y", waypoints_[i][1], -1.0);
-    //   nh.param("fsm/waypoint" + to_string(i) + "_z", waypoints_[i][2], -1.0);
-    // }
 
     nh.param("fsm/step_X", stepX_, -1.0);
     nh.param("fsm/step_Y", stepY_, -1.0);
@@ -94,25 +88,34 @@ namespace ego_planner
       string waypoint_topic_name = string("/uav") + std::to_string(planner_manager_->pp_.drone_id) + string("/prometheus/ego/goal");
       waypoint_sub_ = nh.subscribe(waypoint_topic_name.c_str(), 1, &EGOReplanFSM::waypointCallback, this);
     }
-    else if (target_type_ == TARGET_TYPE::PRESET_TARGET)
+    else if (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET)
     {
       trigger_sub_ = nh.subscribe("/traj_start_trigger", 1, &EGOReplanFSM::triggerCallback, this);
       ROS_INFO("Wait for 1 second.");
-      int count = 0;
-      while (ros::ok() && count++ < 1000)
+      ros::Duration(1.0).sleep();
+      ros::spinOnce();
+
+      if (target_type_ == TARGET_TYPE::PRESET_TARGET)
       {
-        ros::spinOnce();
-        ros::Duration(0.001).sleep();
+        for (int i = 0; i < waypoint_num_; i++)
+        {
+          nh.param("fsm/waypoint" + to_string(i) + "_x", waypoints_[i][0], -1.0);
+          nh.param("fsm/waypoint" + to_string(i) + "_y", waypoints_[i][1], -1.0);
+          nh.param("fsm/waypoint" + to_string(i) + "_z", waypoints_[i][2], -1.0);
+        }
+      }
+      else // GENERATE_TARGET
+      {
+        generateWps();
+        ROS_INFO("Generate waypoint_num_ = %d", waypoint_num_);
       }
 
-      generateWps();
       if (waypoint_num_ <= 0)
       {
         ROS_ERROR("Wrong waypoint_num_ = %d", waypoint_num_);
         waypoint_num_ = 1;
       }
 
-      ROS_INFO("Generate waypoint_num_ = %d", waypoint_num_);
       wps_.resize(waypoint_num_);
       for (int i = 0; i < waypoint_num_; i++)
       {
@@ -141,8 +144,10 @@ namespace ego_planner
 
       readGivenWps();
     }
-    else
+    else 
+    {
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
+    }
   }
 
   void EGOReplanFSM::generateWps()
@@ -164,7 +169,7 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
-    sleep(45);
+    // sleep(45);
   }
 
   int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 
@@ -254,26 +259,42 @@ namespace ego_planner
     return idx;
   }
 
-  int EGOReplanFSM:: generateSpiralWaypoints(
+  int EGOReplanFSM::generateSpiralWaypoints(
     double X, double Y, double R, int numSpiralSegments, double minZ, double maxZ, double stepZ)
-  {
-    std::vector<std::tuple<double, double>> Point2D;
+{
+    // 1. 生成 2D 圆周点
+    std::vector<Eigen::Vector2d> circle_points;
     double deltaAngle = 2 * M_PI / numSpiralSegments;
     for (int i = 0; i < numSpiralSegments; i++)
     {
-      Point2D.push_back(std::make_tuple(X + R * cos(deltaAngle * i), Y + R * sin(deltaAngle * i)));
+        circle_points.emplace_back(X + R * cos(deltaAngle * i), Y + R * sin(deltaAngle * i));
     }
-    int idx = 0;
-    for (double z = minZ + stepZ; z < maxZ; z += stepZ)
+
+    // 2. 生成 3D 螺旋 (Z轴上升)
+    int wp_cnt = 0;
+    int circle_idx = 0;
+    
+    // 预估需要的空间并 resize (假设 waypoints_ 是 vector<Eigen::Vector3d> 类型)
+    // 如果 waypoints_ 是定长数组，忽略 resize，但要在下方加越界判断
+    int estimated_steps = (maxZ - minZ) / stepZ + 1;
+    // if (wps_.size() < estimated_steps) wps_.resize(estimated_steps); 
+
+    for (double z = minZ; z < maxZ; z += stepZ)
     {
-      if (idx == Point2D.size())  idx = 0;
-      waypoints_[idx][0] = std::get<0>(Point2D[idx]);
-      waypoints_[idx][1] = std::get<1>(Point2D[idx]);
-      waypoints_[idx][2] = z;
-      idx++;
+        // 防止 circle_points 为空导致的除零/越界
+        if (circle_points.empty()) break;
+        int current_circle_idx = circle_idx % circle_points.size();
+
+        waypoints_[wp_cnt][0] = circle_points[current_circle_idx](0);
+        waypoints_[wp_cnt][1] = circle_points[current_circle_idx](1);
+        waypoints_[wp_cnt][2] = z;
+
+        wp_cnt++;
+        circle_idx++;
     }
-    return idx;
-  }
+
+    return wp_cnt;
+}
 
   // 读取预设目标点
   void EGOReplanFSM::readGivenWps()
@@ -696,7 +717,8 @@ namespace ego_planner
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
 
       /* && (end_pt_ - pos).norm() < 0.5 */
-      if ((target_type_ == TARGET_TYPE::PRESET_TARGET) &&
+      if ((target_type_ == TARGET_TYPE::PRESET_TARGET || 
+          target_type_ == TARGET_TYPE::GENERATE_TARGET) &&
           (wp_id_ < waypoint_num_ - 1) &&
           (end_pt_ - pos).norm() < no_replan_thresh_)
       {

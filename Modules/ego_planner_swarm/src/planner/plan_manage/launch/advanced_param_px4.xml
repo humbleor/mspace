@@ -44,7 +44,7 @@
   <arg name="waypointDistriFlag"/>
 
   <!-- main node -->
-  <node pkg="ego_planner" name="uav$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen">
+  <node pkg="ego_planner" name="uav_$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen">
     <!-- /uav1/mavros/local_position/odom -->
     <remap from="~odom_world" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
     <remap from="~planning/bspline" to = "/uav$(arg uav_id)/planning/bspline"/>
