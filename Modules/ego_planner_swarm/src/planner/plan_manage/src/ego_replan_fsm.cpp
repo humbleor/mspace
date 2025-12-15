@@ -129,7 +129,7 @@ namespace ego_planner
       for (size_t i = 0; i < (size_t)waypoint_num_; i++)
       {
         // 发布目标点用于显示 "/uav_x_ego_planner_node/goal_point" - [目标点,颜色,大小,id]
-        visualization_->displayGoalPoint(wps_[i], Eigen::Vector4d(0, 0.5, 0.5, 1), 0.3, i);
+        visualization_->displayGoalPoint(wps_[i], Eigen::Vector4d(1.0, 0, 0, 1), 0.3, i);
         ros::Duration(0.001).sleep();
       }
 
@@ -169,7 +169,7 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
-    // sleep(45);
+    sleep(45);
   }
 
   int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 
@@ -342,7 +342,7 @@ namespace ego_planner
       }
 
       // 发布GlobalPath用于显示 "/uav_x_ego_planner_node/global_list" - [GlobalPath,大小,id]
-      visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      visualization_->displayGlobalPathList(gloabl_traj, 0.1, wp_id_);
     }
     else
     {
