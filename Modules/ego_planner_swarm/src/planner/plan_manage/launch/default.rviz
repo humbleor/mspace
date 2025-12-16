@@ -193,7 +193,7 @@ Visualization Manager:
               Marker Topic: /uav_1_ego_planner_node/global_list
               Name: global_path
               Namespaces:
-                {}
+                "": true
               Queue Size: 100
               Value: true
             - Class: rviz/Marker
@@ -2775,7 +2775,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 34.27972412109375
+      Distance: 12.489501953125
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -2783,17 +2783,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -16.60627555847168
-        Y: -0.7551491260528564
-        Z: 9.5367431640625e-07
+        X: 0.9864778518676758
+        Y: 4.030457496643066
+        Z: 6.90711976858438e-06
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.7997966408729553
+      Pitch: 0.5247963666915894
       Target Frame: <Fixed Frame>
-      Yaw: 3.1715993881225586
+      Yaw: 3.1916000843048096
     Saved:
       - Class: rviz/FPS
         Enable Stereo Rendering:
@@ -2864,7 +2864,7 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 1848
-  X: 581
-  Y: 139
+  X: 549
+  Y: 107
   depth:
     collapsed: false

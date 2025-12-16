@@ -3,7 +3,7 @@
 	<!-- 启动MAVROS -->
 	<!-- 不同机载电脑,注意修改fcu_url至正确的端口号及波特率 -->
 	<arg name="serial_port" default="/dev/ttyACM0"/>
-	<arg name="gcs_ip" default="192.168.1.101"/>
+	<arg name="gcs_ip" default="192.168.1.70"/>
 
 	<group ns="uav1">
 		<node pkg="mavros" type="mavros_node" name="mavros" output="screen">

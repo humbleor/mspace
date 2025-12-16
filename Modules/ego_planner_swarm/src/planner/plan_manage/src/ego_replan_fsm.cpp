@@ -17,7 +17,7 @@ namespace ego_planner
     // 重规划时间间隔
     nh.param("fsm/thresh_replan_time", replan_thresh_, -1.0);
     // 与目标距离小于该参数时，停止规划
-    nh.param("fsm/thresh_no_replan_meter", no_replan_thresh_, 0.5); //-1.0
+    nh.param("fsm/thresh_no_replan_meter", no_replan_thresh_, -1.0);
     // 规划范围
     nh.param("fsm/planning_horizon", planning_horizen_, -1.0);
     // 紧急停止时间
