@@ -79,17 +79,10 @@
 
   <!-- trajectory server -->
   <node pkg="ego_planner" name="uav$(arg uav_id)_traj_server" type="traj_server" output="screen">
-    <remap from="position_cmd" to="/uav$(arg uav_id)/prometheus/ego/traj_cmd"/>
+    <remap from="position_cmd" to="/uav$(arg uav_id)/planning/ego/traj_cmd"/>
     <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>
-
-  <!-- <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
-    <remap from="~odom" to="$(arg odom_topic)"/>        
-    <remap from="~goal" to="/move_base_simple/goal"/>
-    <remap from="~traj_start_trigger" to="/traj_start_trigger" />
-    <param name="waypoint_type" value="manual-lonely-waypoint"/>    
-  </node> -->
 
   <node pkg="odom_visualization" name="odom_visualization" type="odom_visualization" output="screen">
         <remap from="~odom" to="$(arg odom_topic)"/>

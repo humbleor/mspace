@@ -134,7 +134,7 @@ int main(int argc, char **argv)
     uav_name = "/uav" + std::to_string(uav_id);
 
     // 【订阅】EGO的轨迹输出(traj_server的输出)
-    ego_ouput_sub = nh.subscribe<quadrotor_msgs::PositionCommand>(uav_name + "/prometheus/ego/traj_cmd", 1, ego_ouput_cb);
+    ego_ouput_sub = nh.subscribe<quadrotor_msgs::PositionCommand>(uav_name + "/planning/ego/traj_cmd", 1, ego_ouput_cb);
 
     // 【发布】 路径指令 （发送至swarm_controller.cpp）
     command_pub = nh.advertise<prometheus_msgs::SwarmCommand>(uav_name + "/prometheus/swarm_command", 1);

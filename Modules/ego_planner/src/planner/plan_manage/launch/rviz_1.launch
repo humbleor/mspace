@@ -1,8 +1,0 @@
-<launch>
-
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find ego_planner)/launch/default.rviz" required="true" />
-<!-- run the rosbag.cpp -->
-<node pkg="rosbag" type="record" name="bag_record" output="screen" args = "/prometheus/drone_state -o subset">	
-		
-</node>	
-</launch>

@@ -40,11 +40,7 @@ To run the simulation, you must first set up the PX4 firmware (v1.13.2).
 
 ```bash
 # Clone PX4 Autopilot
-git clone https://github.com/PX4/PX4-Autopilot.git
-mv PX4-Autopilot PX4_Firmware
-cd PX4_Firmware
-# Checkout specific version
-git checkout -b tag-1.13.2 v1.13.2
+git clone https://github.com/humbleor/PX4_Firmware.git
 # Update submodules
 git submodule update --init --recursive
 # Build SITL
@@ -52,7 +48,9 @@ make px4_sitl_default gazebo
 ```
 
 #### Start Simulation
-
+```bash
+roslaunch 
+```
 
 
 ---
@@ -67,7 +65,7 @@ Run the integrated script for Fast-LIO2 and EGO-Planner with Livox support:
 ./ego_fastlio2_one_livox.sh
 ```
 
-#### Swarm / Cluster (集群)
+#### Swarm (集群)
 
 For multi-UAV operation, execute the following on the respective machines:
 

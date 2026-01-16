@@ -43,6 +43,8 @@ add_message_files(
   UgvCommand.msg
   LinktrackNode2.msg	
   LinktrackNodeframe2.msg
+  LivoxCustomPoint.msg
+  LivoxCustomMsg.msg
 )
 
 add_action_files(

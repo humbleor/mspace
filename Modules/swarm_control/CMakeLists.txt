@@ -58,8 +58,7 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ../common/include
-  ../ego_planner/src/uav_simulator/Utils/uav_utils/include
-  # ../ego-planner-swarm/src/uav_simulator/Utils/uav_utils/include
+  ../ego_planner_swarm/src/uav_simulator/Utils/uav_utils/include
 )
 
 
