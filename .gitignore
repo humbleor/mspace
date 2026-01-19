@@ -1,6 +1,6 @@
 build/
 devel/
-Modules/ego_planner/src/uav_simulator/lidarmap_generator/resource
+Modules/ego_planner_swarm/src/uav_simulator/lidar_map_generator/resource
 
 __pycache__
 _ext
