@@ -1,12 +1,10 @@
 <?xml version="1.0"?>
 <package>
-  <name>local_sensing_node</name>
+  <name>local_sensing_node1</name>
   <version>0.1.0</version>
-  <description>
-    render depth from depth
-  </description>
-  <author>Matia Pizzoli</author>
-  <maintainer email="matia.pizzoli@gmail.com">Matia Pizzoli</maintainer>
+  <description>The local_sensing package</description>
+  <author>Fanze Kong</author>
+  <maintainer email="jackykongfz@gmail.com">Fanze Kong</maintainer>
   <license>GPLv3</license>
 
   <!-- Dependencies which this package needs to build itself. -->

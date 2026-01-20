@@ -76,7 +76,7 @@
   </node]]>
 
   
-  <node pkg="so3_quadrotor_simulator" type="quadrotor_simulator_so3" name="uav_$(arg uav_id)_quadrotor_simulator_so3" output="screen">
+  <!-- <node pkg="so3_quadrotor_simulator" type="quadrotor_simulator_so3" name="uav_$(arg uav_id)_quadrotor_simulator_so3" output="screen">
         <param name="rate/odom" value="200.0"/>
         <param name="simulator/init_state_x" value="$(arg init_x_)"/>
         <param name="simulator/init_state_y" value="$(arg init_y_)"/>
@@ -104,15 +104,15 @@
         <param name="use_external_yaw "      value="false"/>
         <param name="gains/rot/z" value="1.0"/>    
         <param name="gains/ang/z" value="0.1"/>        
-  </node>  
+  </node>   -->
   
-  <!-- <node pkg="poscmd_2_odom" name="uav_$(arg uav_id)_poscmd_2_odom" type="poscmd_2_odom" output="screen">
+  <node pkg="poscmd_2_odom" name="uav_$(arg uav_id)_poscmd_2_odom" type="poscmd_2_odom" output="screen">
         <param name="init_x" value="$(arg init_x_)"/>
         <param name="init_y" value="$(arg init_y_)"/>
         <param name="init_z" value="$(arg init_z_)"/>
         <remap from="~command" to="/uav$(arg uav_id)/planning/pos_cmd"/>
         <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
-  </node> -->
+  </node>
  
   <node pkg="odom_visualization" name="uav_$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen">
         <remap from="~odom" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
@@ -127,8 +127,8 @@
         <param name="uav_id" value="uav_id"/>
   </node>
   
-  <!-- <node pkg="local_sensing_node" type="pcl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen">
-        <rosparam command="load" file="$(find local_sensing_node)/include/camera.yaml" />
+  <node pkg="local_sensing_node" type="pcl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen">
+        <rosparam command="load" file="$(find local_sensing_node)/params/camera.yaml" />
         <param name="sensing_horizon"  value="5.0" />
         <param name="sensing_rate"     value="30.0"/>
         <param name="estimation_rate"  value="30.0"/>
@@ -141,46 +141,6 @@
         <remap from="~odometry"   to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
         <remap from="~pcl_render_node/cloud"   to="/uav$(arg uav_id)/pcl_render_node/cloud"/>
         <param name="use_uav_extra_model" value="0"/>
-  </node> -->
-
-
-  <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
-            args="$(arg map_name_)">
-      <remap from="~global_map" to="/map_generator/global_cloud"/>
-      <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
-
-      <param name="uav_id" value="$(arg uav_id)"/>
-      <param name="quadrotor_name" value="uav_$(arg uav_id)"/>
-      <param name="uav_num" value="$(arg uav_num_)"/>
-      <param name="is_360lidar" value="1"/>
-      <param name="sensing_horizon" value="15.0"/>
-      <param name="sensing_rate" value="10.0"/>
-      <param name="estimation_rate" value="10.0"/>
-      <param name="polar_resolution" value="0.2"/>
-      <param name="yaw_fov" value="360.0"/>
-      <param name="vertical_fov" value="90.0"/>
-      <param name="min_raylength" value="1.0"/>
-      <param name="livox_linestep" value="1.4"/>
-      <param name="curvature_limit" value="100.0"/>
-      <param name="hash_cubesize" value="5.0"/>
-      <param name="use_avia_pattern" value="0"/>
-      <param name="use_vlp32_pattern" value="0"/>
-      <param name="use_minicf_pattern" value="1"/>
-
-      <param name="downsample_res" value="$(arg downsample_resolution_)"/>
-
-      <param name="dynobj_enable" value="0"/>
-      <param name="dynobject_size" value="0.8"/>
-      <param name="dynobject_num" value="10"/>
-      <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
-      <param name="dyn_velocity" value="1.0"/>
-
-      <param name="use_uav_extra_model" value="0"/>
-
-      <!-- collision parameter -->
-      <param name="collisioncheck_enable" value="0"/>
-      <param name="collision_range" value="0.3"/>
-      <param name="output_pcd" value="0"/>
   </node>
 
 </launch>

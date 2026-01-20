@@ -3,21 +3,25 @@
   <arg name="map_size_x" value="100.0"/>
   <arg name="map_size_y" value="100.0"/>
   <arg name="map_size_z" value="10.0"/>
+  <arg name="init_x" value="0.0"/>
+  <arg name="init_y" value="0.0"/>
+  <arg name="init_z" value="0.1"/>
 
-  <arg name="uav_id" value="1"/>
+  <arg name="uav_id_1" value="1"/>
+  <arg name="uav_id_2" value="2"/>
   <arg name="uav_num" value="2"/>
 
   <arg name="frame_id" value="world"/>
   <arg name="global_cloud_topic" value="/map_generator/global_cloud"/>
   <!-- topic of your odometry such as VIO or LIO -->
-  <arg name="odom_topic" value="/lidar_slam/odom"/>
+  <arg name="odom_topic" value="lidar_slam/odom"/>
 
   <!-- number of moving objects -->
   <arg name="obj_num" value="10" />
 
   <!-- map -->
-  <arg name="use_gpu_" value="true"/>
-  <arg name="map_name" value="$(find lidar_map_generator)/resource/small_forest01cutoff.pcd"/> <!-- use your pcd file -->
+  <arg name="use_gpu_" value="false"/>
+  <arg name="map_name" value="/home/mspace/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/> <!-- use your pcd file -->
   <arg name="downsample_resolution" value="0.1"/>
   <arg name="use_uav_extra_model" value = "0"/>
   
@@ -25,24 +29,24 @@
       <node pkg="lidar_map_generator" name="map_pub1" type="map_pub" output="screen"
               args="$(arg map_name)">
               <param name="downsample_res" value="0.1"/>         
-              <param name="map_offset_x" value="0.0"/>   
-              <param name="map_offset_y" value="0.0"/>   
-              <param name="map_offset_z" value="0.0"/>   
+              <param name="map_offset_x" value="10.0"/>   
+              <param name="map_offset_y" value="-10.0"/>   
+              <param name="map_offset_z" value="-3.0"/>
       </node>  
   </group>
   <group unless="$(arg use_gpu_)">
       <node pkg="lidar_map_generator" name="map_pub2" type="map_pub" output="screen"
               args="$(arg map_name)">
               <param name="downsample_res" value="$(arg downsample_resolution)"/>
-              <param name="map_offset_x" value="0.0"/>   
-              <param name="map_offset_y" value="0.0"/>   
-              <param name="map_offset_z" value="0.0"/>   
+              <param name="map_offset_x" value="10.0"/>   
+              <param name="map_offset_y" value="-10.0"/>   
+              <param name="map_offset_z" value="-3.0"/>   
       </node>  
   </group>
 
   <!-- main algorithm params -->
   <include file="$(find ego_planner)/launch/advanced_param_px4.xml">
-    <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="uav_id" value="1"/>
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
@@ -50,15 +54,15 @@
     <arg name="obj_num_set" value="$(arg obj_num)" />
 
     <!-- 路径点生成参数 -->
-    <arg name="box_min_x" value="0.0"/>
-    <arg name="box_min_y" value="0.0"/>
+    <arg name="box_min_x" value="1.0"/>
+    <arg name="box_min_y" value="1.0"/>
     <arg name="box_min_z" value="2.0"/>
     <arg name="box_max_x" value="10.0"/>
-    <arg name="box_max_y" value="10.0"/>
+    <arg name="box_max_y" value="1.0"/>
     <arg name="box_max_z" value="3.0"/>
 
     <arg name="step_X" value="3.0"/>
-    <arg name="step_Y" value="3.0"/>
+    <arg name="step_Y" value="1.0"/>
     <arg name="step_Z" value="2.0"/>
 
     <!-- waypointDistribution flag 0:水平遍历fly, 1表示垂直fly, 2表示螺旋式fly,针对单颗树木-->
@@ -109,11 +113,88 @@
 
   </include>
 
+    <!-- main algorithm params -->
+  <include file="$(find ego_planner)/launch/advanced_param_px4.xml">
+    <arg name="uav_id" value="2"/>
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num_set" value="$(arg obj_num)" />
+
+    <!-- 路径点生成参数 -->
+    <arg name="box_min_x" value="1.0"/>
+    <arg name="box_min_y" value="5.0"/>
+    <arg name="box_min_z" value="2.0"/>
+    <arg name="box_max_x" value="10.0"/>
+    <arg name="box_max_y" value="7.0"/>
+    <arg name="box_max_z" value="3.0"/>
+
+    <arg name="step_X" value="3.0"/>
+    <arg name="step_Y" value="1.0"/>
+    <arg name="step_Z" value="2.0"/>
+
+    <!-- waypointDistribution flag 0:水平遍历fly, 1表示垂直fly, 2表示螺旋式fly,针对单颗树木-->
+    <arg name="waypointDistriFlag" value="0"/>
+
+    <!-- 围绕单颗树螺旋式上升参数设置 -->
+    <!-- // X,Y是单木的水平坐标，R是环绕飞行的半径，numSpiralSegments是一个水平圆周上分布几个点，stepZ_rotate是绕飞的垂直步长 -->
+    <arg name="coordinate_X" value="1.5"/> 
+    <arg name="coordinate_Y" value="1.5"/>
+    <arg name="minZ_rotate" value="2.0"/> 
+    <arg name="maxZ_rotate" value="10"/>    
+    <arg name="radius_R" value="1.7"/>
+    <arg name="numSpiralSegments" value="4"/>
+    <arg name="stepZ_rotate" value="0.5"/>
+
+    <!-- camera pose: transform of camera frame in the world frame -->
+    <!-- depth topic: depth image, 640x480 by default -->
+    <!-- don't set cloud_topic if you already set these ones! -->
+    <arg name="camera_pose_topic" value="pcl_render_node/camera_pose"/>
+    <arg name="depth_topic" value="pcl_render_node/depth"/>
+    <!-- <arg name="camera_pose_topic" value="/nouse2"/>
+    <arg name="depth_topic" value="/nouse1"/> -->
+
+    <!-- topic of point cloud measurement, such as from LIDAR  -->
+    <!-- don't set camera pose and depth, if you already set this one! -->
+    <!-- <arg name="cloud_topic" value="drone_cloud_bizhang"/> -->
+    <arg name="cloud_topic" value="pcl_render_node/cloud"/>
+
+    <!-- intrinsic params of the depth camera -->
+    <arg name="cx" value="321.68231201171875"/>
+    <arg name="cy" value="237.12445068359375"/>
+    <arg name="fx" value="383.48455810546875"/>
+    <arg name="fy" value="383.48455810546875"/>
+
+    <!-- maximum velocity and acceleration the drone will reach -->
+    <arg name="max_vel" value="0.6" /> 
+    <arg name="max_acc" value="0.5" />
+
+    <!--always set to 1.5 times grater than sensing horizen-->
+    <arg name="planning_horizon" value="3.5" /> 
+
+    <arg name="use_distinctive_trajs" value="true" />
+
+    <!-- 1: use 2D Nav Goal to select goal  -->
+    <!-- 2: use global waypoints below  -->
+    <!-- 3: use waypointDistriFlag to generate waypoints  -->
+    <arg name="flight_type" value="3" />
+
+  </include>
+
+
   <!-- trajectory server -->
-  <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen">
+  <node pkg="ego_planner" name="uav_$(arg uav_id_1)_traj_server" type="traj_server" output="screen">
     <!-- <remap from="position_cmd" to="/uav$(arg uav_id)/prometheus/ego/traj_cmd"/> -->
-    <remap from="position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
-    <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
+    <remap from="position_cmd" to="/uav$(arg uav_id_1)/planning/pos_cmd"/>
+    <remap from="~planning/bspline" to="/uav$(arg uav_id_1)/planning/bspline"/>
+    <param name="traj_server/time_forward" value="1.0" type="double"/>
+  </node>
+
+    <node pkg="ego_planner" name="uav_$(arg uav_id_2)_traj_server" type="traj_server" output="screen">
+    <!-- <remap from="position_cmd" to="/uav$(arg uav_id)/prometheus/ego/traj_cmd"/> -->
+    <remap from="position_cmd" to="/uav$(arg uav_id_2)/planning/pos_cmd"/>
+    <remap from="~planning/bspline" to="/uav$(arg uav_id_2)/planning/bspline"/>
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>
 
@@ -124,7 +205,7 @@
     <param name="waypoint_type" value="manual-lonely-waypoint"/>    
   </node> -->
 
-  <include file="$(find ego_planner)/launch_new/single_uav.xml">
+  <!-- <include file="$(find ego_planner)/launch_new/single_uav.xml">
       <arg name="uav_id" value="1"/>
       <arg name="uav_num_" value="$(arg uav_num)"/>
       <arg name="lidar_type" value="mid360"/>
@@ -132,29 +213,63 @@
       <arg name="init_y_" value="0.0"/>
       <arg name="init_z_" value="1.0"/>
       <arg name="init_yaw" value="0.0"/>
+          <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
       <arg name="map_name_" value="$(arg map_name)"/>
       <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
-      <arg name="odom_topic" value="$(arg odom_topic)"/>
+      <arg name="odometry_topic" value="$(arg odom_topic)"/>
       <arg name="use_gpu" value="$(arg use_gpu_)"/>
       <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
   </include>
 
   <include file="$(find ego_planner)/launch_new/single_uav.xml">
-      <arg name="uav_id" value="1"/>
+      <arg name="uav_id" value="2"/>
       <arg name="uav_num_" value="$(arg uav_num)"/>
       <arg name="lidar_type" value="mid360"/>
-      <arg name="init_x_" value="-3.0"/>
+      <arg name="init_x_" value="-10.0"/>
       <arg name="init_y_" value="0.0"/>
       <arg name="init_z_" value="1.0"/>
       <arg name="init_yaw" value="0.0"/>
+          <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
       <arg name="map_name_" value="$(arg map_name)"/>
       <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
-      <arg name="odom_topic" value="$(arg odom_topic)"/>
+      <arg name="odometry_topic" value="$(arg odom_topic)"/>
       <arg name="use_gpu" value="$(arg use_gpu_)"/>
       <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
-   </include>
+   </include> -->
+
+     <include file="$(find ego_planner)/launch/simulator.xml">
+    <arg name="uav_id" value="1"/>
+    <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+    <arg name="init_x_" value="$(arg init_x)"/>
+    <arg name="init_y_" value="$(arg init_y)"/>
+    <arg name="init_z_" value="$(arg init_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)" />
+    <arg name="map_name_" value="$(arg map_name)"/>
+    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
+  </include>
+
+  <include file="$(find ego_planner)/launch/simulator.xml">
+    <arg name="uav_id" value="2"/>
+    <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+    <arg name="init_x_" value="$(arg init_x)"/>
+    <arg name="init_y_" value="5"/>
+    <arg name="init_z_" value="$(arg init_z)"/>
+    <arg name="odometry_topic" value="$(arg odom_topic)" />
+    <arg name="map_name_" value="$(arg map_name)"/>
+    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
+  </include>
 
   <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
-  args="-d $(find ego_planner)/launch/rviz.launch" />
+  args="-d $(find ego_planner)/launch_new/traj.rviz" />
 
 </launch>

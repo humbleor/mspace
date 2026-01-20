@@ -783,12 +783,12 @@ int main(int argc, char **argv)
     exit(EXIT_FAILURE);
   }
 
-  string sub_traj_topic_name = string("/drone_") + std::to_string(drone_id_) + string("_planning/swarm_trajs");
+  string sub_traj_topic_name = string("/uav") + std::to_string(drone_id_) + string("/planning/swarm_trajs");
   swarm_trajs_sub_ = nh.subscribe(sub_traj_topic_name.c_str(), 10, multitraj_sub_tcp_cb, ros::TransportHints().tcpNoDelay());
 
   if ( drone_id_ >= 1 )
   {
-    string pub_traj_topic_name = string("/drone_") + std::to_string(drone_id_ - 1) + string("_planning/swarm_trajs");
+    string pub_traj_topic_name = string("/uav") + std::to_string(drone_id_ - 1) + string("/planning/swarm_trajs");
     swarm_trajs_pub_ = nh.advertise<traj_utils::MultiBsplines>(pub_traj_topic_name.c_str(), 10);
   }
 

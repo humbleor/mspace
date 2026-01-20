@@ -71,10 +71,10 @@ namespace ego_planner
     // ego默认从0开始，我们默认从1开始，因此这里>2
     if (planner_manager_->pp_.drone_id >= 2)
     {
-      string sub_topic_name = string("/uav") + std::to_string(planner_manager_->pp_.drone_id - 1) + string("_planning/swarm_trajs");
+      string sub_topic_name = string("/uav") + std::to_string(planner_manager_->pp_.drone_id - 1) + string("/planning/swarm_trajs");
       swarm_trajs_sub_ = nh.subscribe(sub_topic_name.c_str(), 10, &EGOReplanFSM::swarmTrajsCallback, this, ros::TransportHints().tcpNoDelay());
     }
-    string pub_topic_name = string("/uav") + std::to_string(planner_manager_->pp_.drone_id) + string("_planning/swarm_trajs");
+    string pub_topic_name = string("/uav") + std::to_string(planner_manager_->pp_.drone_id) + string("/planning/swarm_trajs");
     swarm_trajs_pub_ = nh.advertise<traj_utils::MultiBsplines>(pub_topic_name.c_str(), 10);
 
     broadcast_bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/broadcast_bspline_from_planner", 10);
@@ -169,7 +169,7 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
-    sleep(45);
+    // sleep(45);
   }
 
   int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 

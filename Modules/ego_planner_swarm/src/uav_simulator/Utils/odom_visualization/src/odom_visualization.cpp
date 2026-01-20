@@ -180,7 +180,7 @@ void odom_callback(const nav_msgs::Odometry::ConstPtr &msg) {
         pose_lidar.pose.position.y -= init_y;
         pose_lidar.pose.position.z -= init_z;
         pathROS.poses.push_back(pose_lidar);
-        pathROS.header.frame_id = quad_name + "world";
+        pathROS.header.frame_id = "world";
         pathPub.publish(pathROS);
     }
 
