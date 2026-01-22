@@ -1,0 +1,410 @@
+<launch>
+    <!-- UAV ID and Initial Position -->
+    <arg name="uav_id"/>
+    <arg name="uav_num_" default="1"/> <!-- Total number of UAVs -->
+    <arg name="init_x"/>
+    <arg name="init_y"/>
+    <arg name="init_z"/>
+
+    <!-- Map Parameters -->
+    <arg name="map_size_x"/>
+    <arg name="map_size_y"/>
+    <arg name="map_size_z"/>
+    <arg name="map_name"/>
+    <arg name="downsample_resolution_"/>
+    <arg name="use_gpu"/>
+    <arg name="use_uav_extra_model_"/>
+    
+    <!-- Topics -->
+    <arg name="odom_topic"/>
+    <arg name="lidar_type"/>
+    <arg name="cloud_topic" default="pcl_render_node/cloud"/>
+    
+    <!-- Algorithm Parameters -->
+    <arg name="obj_num" default="1"/>
+    <arg name="flight_type" default="1"/> 
+    <arg name="max_vel" default="0.6"/>
+    <arg name="max_acc" default="0.5"/>
+    <arg name="planning_horizon" default="3.5"/>
+    <arg name="use_distinctive_trajs" default="true"/>
+
+    <!-- Waypoint Generation Params -->
+    <arg name="box_min_x" default="0"/>
+    <arg name="box_min_y" default="0"/>
+    <arg name="box_min_z" default="0"/>
+    <arg name="box_max_x" default="0"/>
+    <arg name="box_max_y" default="0"/>
+    <arg name="box_max_z" default="0"/>
+    <arg name="step_X" default="0"/>
+    <arg name="step_Y" default="0"/>
+    <arg name="step_Z" default="0"/>
+    <arg name="waypointDistriFlag" default="0"/>
+    <arg name="coordinate_X" default="0"/>
+    <arg name="coordinate_Y" default="0"/>
+    <arg name="minZ_rotate" default="0"/>
+    <arg name="maxZ_rotate" default="0"/>
+    <arg name="radius_R" default="0"/>
+    <arg name="numSpiralSegments" default="0"/>
+    <arg name="stepZ_rotate" default="0"/>
+
+    <!-- Camera Intrinsic -->
+    <arg name="cx" default="321.68231201171875"/>
+    <arg name="cy" default="237.12445068359375"/>
+    <arg name="fx" default="383.48455810546875"/>
+    <arg name="fy" default="383.48455810546875"/>
+
+    <!-- Internal topics (derived) -->
+    <arg name="camera_pose_topic" default="pcl_render_node/camera_pose"/>
+    <arg name="depth_topic" default="pcl_render_node/depth"/>
+
+    <!-- ========================================================== -->
+    <!-- 1. Main Algorithm (Planner) -->
+    <!-- ========================================================== -->
+    <include file="$(find ego_planner)/launch/advanced_param_px4.xml">
+        <arg name="uav_id" value="$(arg uav_id)"/>
+        <arg name="map_size_x_" value="$(arg map_size_x)"/>
+        <arg name="map_size_y_" value="$(arg map_size_y)"/>
+        <arg name="map_size_z_" value="$(arg map_size_z)"/>
+        <arg name="odometry_topic" value="$(arg odom_topic)"/>
+        <arg name="obj_num_set" value="$(arg obj_num)"/>
+        
+        <arg name="box_min_x" value="$(arg box_min_x)"/>
+        <arg name="box_min_y" value="$(arg box_min_y)"/>
+        <arg name="box_min_z" value="$(arg box_min_z)"/>
+        <arg name="box_max_x" value="$(arg box_max_x)"/>
+        <arg name="box_max_y" value="$(arg box_max_y)"/>
+        <arg name="box_max_z" value="$(arg box_max_z)"/>
+        <arg name="step_X" value="$(arg step_X)"/>
+        <arg name="step_Y" value="$(arg step_Y)"/>
+        <arg name="step_Z" value="$(arg step_Z)"/>
+        <arg name="waypointDistriFlag" value="$(arg waypointDistriFlag)"/>
+
+        <arg name="coordinate_X" value="$(arg coordinate_X)"/> 
+        <arg name="coordinate_Y" value="$(arg coordinate_Y)"/>
+        <arg name="minZ_rotate" value="$(arg minZ_rotate)"/> 
+        <arg name="maxZ_rotate" value="$(arg maxZ_rotate)"/>    
+        <arg name="radius_R" value="$(arg radius_R)"/>
+        <arg name="numSpiralSegments" value="$(arg numSpiralSegments)"/>
+        <arg name="stepZ_rotate" value="$(arg stepZ_rotate)"/>
+
+        <arg name="camera_pose_topic" value="$(arg camera_pose_topic)"/>
+        <arg name="depth_topic" value="$(arg depth_topic)"/>
+        <arg name="cloud_topic" value="$(arg cloud_topic)"/>
+
+        <arg name="cx" value="$(arg cx)"/>
+        <arg name="cy" value="$(arg cy)"/>
+        <arg name="fx" value="$(arg fx)"/>
+        <arg name="fy" value="$(arg fy)"/>
+
+        <arg name="max_vel" value="$(arg max_vel)"/> 
+        <arg name="max_acc" value="$(arg max_acc)"/>
+        <arg name="planning_horizon" value="$(arg planning_horizon)"/> 
+        <arg name="use_distinctive_trajs" value="$(arg use_distinctive_trajs)"/>
+        <arg name="flight_type" value="$(arg flight_type)"/>
+    </include>
+
+    <!-- ========================================================== -->
+    <!-- 2. Trajectory Server -->
+    <!-- ========================================================== -->
+    <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen">
+        <remap from="position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+        <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
+        <param name="traj_server/time_forward" value="1.0" type="double"/>
+    </node>
+
+    <!-- ========================================================== -->
+    <!-- 3. Simulator (Position/Odom + Sensors) -->
+    <!-- ========================================================== -->
+    <node pkg="poscmd_2_odom" name="uav_$(arg uav_id)_poscmd_2_odom" type="poscmd_2_odom" output="screen">
+        <param name="init_x" value="$(arg init_x)"/>
+        <param name="init_y" value="$(arg init_y)"/>
+        <param name="init_z" value="$(arg init_z)"/>
+        <remap from="~command" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+        <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+    </node>
+
+    <node pkg="odom_visualization" name="uav_$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen">
+        <remap from="~odom" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+        <param name="color/a" value="1.0"/>    
+        <param name="color/r" value="0.0"/>        
+        <param name="color/g" value="0.0"/>        
+        <param name="color/b" value="0.0"/>       
+        <param name="covariance_scale" value="100.0"/>       
+        <param name="robot_scale" value="1.0"/>
+        <param name="tf45" value="true"/>
+        <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+        <param name="uav_id" value="uav_id"/>
+    </node>
+
+    <group if="$(arg use_gpu)">
+
+        <group if="$(eval lidar_type == 'avia')">
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+                args="$(arg map_name)">
+            <remap from="~global_map" to="/map_generator/global_cloud"/>
+            <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+            <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+            <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+            <param name="uav_id" value="$(arg uav_id)"/>
+            <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+            <param name="uav_num" value="$(arg uav_num_)"/>
+            <param name="is_360lidar" value="0"/>
+            <param name="sensing_horizon" value="30.0"/>
+            <param name="sensing_rate" value="10.0"/>
+            <param name="estimation_rate" value="10.0"/>
+            <param name="polar_resolution" value="0.2"/>
+            <param name="yaw_fov" value="70.4"/>
+            <param name="vertical_fov" value="77.2"/>
+            <param name="min_raylength" value="1.0"/>
+            <param name="livox_linestep" value="1.4"/>
+            <param name="curvature_limit" value="100.0"/>
+            <param name="hash_cubesize" value="5.0"/>
+            <param name="use_avia_pattern" value="1"/>
+
+            <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+            <param name="dynobj_enable" value="0"/>
+            <param name="dynobject_size" value="0.8"/>
+            <param name="dynobject_num" value="10"/>
+            <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+            <param name="dyn_velocity" value="1.0"/>
+
+            <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+            <!-- collision parameter -->
+            <param name="collisioncheck_enable" value="0"/>
+            <param name="collision_range" value="0.3"/>
+
+            <param name="output_pcd" value="0"/>
+
+        </node>
+        </group>
+
+        <group if="$(eval lidar_type == 'mid360')">
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+                args="$(arg map_name)">
+                <remap from="~global_map" to="/map_generator/global_cloud"/>
+                <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+                <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+                <param name="uav_id" value="$(arg uav_id)"/>
+                <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+                <param name="uav_num" value="$(arg uav_num_)"/>
+                <param name="is_360lidar" value="1"/>
+                <param name="sensing_horizon" value="15.0"/>
+                <param name="sensing_rate" value="10.0"/>
+                <param name="estimation_rate" value="10.0"/>
+                <param name="polar_resolution" value="0.2"/>
+                <param name="yaw_fov" value="360.0"/>
+                <param name="vertical_fov" value="90.0"/>
+                <param name="min_raylength" value="1.0"/>
+                <param name="livox_linestep" value="1.4"/>
+                <param name="curvature_limit" value="100.0"/>
+                <param name="hash_cubesize" value="5.0"/>
+                <param name="use_avia_pattern" value="0"/>
+                <param name="use_vlp32_pattern" value="0"/>
+                <param name="use_minicf_pattern" value="1"/>
+
+                <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+                <param name="dynobj_enable" value="0"/>
+                <param name="dynobject_size" value="0.8"/>
+                <param name="dynobject_num" value="10"/>
+                <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+                <param name="dyn_velocity" value="1.0"/>
+
+                <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+                <!-- collision parameter -->
+                <param name="collisioncheck_enable" value="0"/>
+                <param name="collision_range" value="0.3"/>
+                <param name="output_pcd" value="0"/>
+            </node>
+        </group>
+
+        <group if="$(eval lidar_type == 'os128')">
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+                args="$(arg map_name)">
+                <remap from="~global_map" to="/map_generator/global_cloud"/>
+                <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+                <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+                <param name="uav_id" value="$(arg uav_id)"/>
+                <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+                <param name="uav_num" value="$(arg uav_num_)"/>
+                <param name="is_360lidar" value="1"/>
+                <param name="sensing_horizon" value="15.0"/>
+                <param name="sensing_rate" value="10.0"/>
+                <param name="estimation_rate" value="10.0"/>
+                <param name="polar_resolution" value="0.2"/>
+                <param name="yaw_fov" value="360.0"/>
+                <param name="vertical_fov" value="60.0"/>
+                <param name="min_raylength" value="1.0"/>
+                <param name="livox_linestep" value="1.4"/>
+                <param name="curvature_limit" value="100.0"/>
+                <param name="hash_cubesize" value="5.0"/>
+                <param name="use_avia_pattern" value="0"/>
+                <param name="use_vlp32_pattern" value="0"/>
+                <param name="use_minicf_pattern" value="0"/>
+                <param name="use_os128_pattern" value="1"/>
+
+                <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+                <param name="dynobj_enable" value="0"/>
+                <param name="dynobject_size" value="0.8"/>
+                <param name="dynobject_num" value="10"/>
+                <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+                <param name="dyn_velocity" value="1.0"/>
+
+                <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+                <!-- collision parameter -->
+                <param name="collisioncheck_enable" value="0"/>
+                <param name="collision_range" value="0.3"/>
+                <param name="output_pcd" value="0"/>
+            </node>
+        </group>
+
+    </group>
+
+    <group unless="$(arg use_gpu)">
+        <!-- Livox Avia launch-prefix="gdb -ex run -args" -->
+        <group if="$(eval lidar_type == 'avia')">
+            <node pkg="local_sensing_node" type="pointcloud_render_node" name="uav_$(arg uav_id)_pcl_render_node"
+                output="screen">
+                <remap from="~global_map" to="/map_generator/global_cloud"/>
+                <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+                <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+                <param name="uav_id" value="$(arg uav_id)"/>
+                <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+                <param name="uav_num" value="$(arg uav_num_)"/>
+                <param name="is_360lidar" value="0"/>
+                <param name="sensing_horizon" value="30.0"/>
+                <param name="sensing_rate" value="10.0"/>
+                <param name="estimation_rate" value="10.0"/>
+                <param name="polar_resolution" value="0.2"/>
+                <param name="yaw_fov" value="70.4"/>
+                <param name="vertical_fov" value="77.2"/>
+                <param name="min_raylength" value="1.0"/>
+                <param name="livox_linestep" value="1.4"/>
+                <param name="curvature_limit" value="100.0"/>
+                <param name="hash_cubesize" value="5.0"/>
+                <param name="use_avia_pattern" value="1"/>
+
+                <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+                <param name="dynobj_enable" value="0"/>
+                <param name="dynobject_size" value="0.8"/>
+                <param name="dynobject_num" value="10"/>
+                <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+                <param name="dyn_velocity" value="1.0"/>
+
+                <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+                <!-- collision parameter -->
+                <param name="collisioncheck_enable" value="0"/>
+                <param name="collision_range" value="0.3"/>
+
+                <param name="output_pcd" value="0"/>
+            </node>
+
+        </group>
+
+
+        <!-- VLP-32 -->
+launch-prefix="gdb --ex run -args"
+        <group if="$(eval lidar_type == 'mid360')">
+            <node pkg="local_sensing_node" type="pointcloud_render_node"
+                name="uav_$(arg uav_id)_pcl_render_node" output="screen" > <!--  -->
+                <remap from="~global_map" to="/map_generator/global_cloud"/>
+                <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+                <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+                <param name="uav_id" value="$(arg uav_id)"/>
+                <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+                <param name="uav_num" value="$(arg uav_num_)"/>
+                <param name="is_360lidar" value="1"/>
+                <param name="sensing_horizon" value="15.0"/>
+                <param name="sensing_rate" value="10.0"/>
+                <param name="estimation_rate" value="10.0"/>
+                <param name="polar_resolution" value="0.2"/>
+                <param name="yaw_fov" value="360.0"/>
+                <param name="vertical_fov" value="90.0"/>
+                <param name="min_raylength" value="1.0"/>
+                <param name="livox_linestep" value="1.4"/>
+                <param name="curvature_limit" value="100.0"/>
+                <param name="hash_cubesize" value="5.0"/>
+                <param name="use_avia_pattern" value="0"/>
+                <param name="use_vlp32_pattern" value="0"/>
+                <param name="use_minicf_pattern" value="1"/>
+
+                <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+                <param name="dynobj_enable" value="0"/>
+                <param name="dynobject_size" value="0.6"/>
+                <param name="dynobject_num" value="30"/>
+                <param name="dyn_mode" value="2"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+                <param name="dyn_velocity" value="3.0"/>
+
+                <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+                <!-- collision parameter -->
+                <param name="collisioncheck_enable" value="0"/>
+                <param name="collision_range" value="0.3"/>
+                <param name="output_pcd" value="0"/>
+            </node>
+        </group>        
+
+        <group if="$(eval lidar_type == 'os128')">
+            <node pkg="local_sensing_node" type="pointcloud_render_node"
+                name="uav_$(arg uav_id)_pcl_render_node" output="screen"> <!--  -->
+                <remap from="~global_map" to="/map_generator/global_cloud"/>
+                <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
+                <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
+                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+
+                <param name="uav_id" value="$(arg uav_id)"/>
+                <param name="quadrotor_name" value="uav$(arg uav_id)"/>
+                <param name="uav_num" value="$(arg uav_num_)"/>
+                <param name="is_360lidar" value="1"/>
+                <param name="sensing_horizon" value="15.0"/>
+                <param name="sensing_rate" value="10.0"/>
+                <param name="estimation_rate" value="10.0"/>
+                <param name="polar_resolution" value="0.2"/>
+                <param name="yaw_fov" value="360.0"/>
+                <param name="vertical_fov" value="60.0"/>
+                <param name="min_raylength" value="1.0"/>
+                <param name="livox_linestep" value="1.4"/>
+                <param name="curvature_limit" value="100.0"/>
+                <param name="hash_cubesize" value="5.0"/>
+                <param name="use_avia_pattern" value="0"/>
+                <param name="use_vlp32_pattern" value="0"/>
+                <param name="use_minicf_pattern" value="0"/>
+                <param name="use_os128_pattern" value="1"/>
+
+                <param name="downsample_res" value="$(arg downsample_resolution_)"/>
+
+                <param name="dynobj_enable" value="0"/>
+                <param name="dynobject_size" value="0.8"/>
+                <param name="dynobject_num" value="10"/>
+                <param name="dyn_mode" value="0"/><!-- 0 for a=0, 1 for a=g, 2 for random walk -->
+                <param name="dyn_velocity" value="1.0"/>
+
+                <param name="use_uav_extra_model" value="$(arg use_uav_extra_model_)"/>
+
+                <!-- collision parameter -->
+                <param name="collisioncheck_enable" value="0"/>
+                <param name="collision_range" value="0.3"/>
+                <param name="output_pcd" value="0"/>
+
+            </node>
+        </group>        
+    </group>
+
+</launch>

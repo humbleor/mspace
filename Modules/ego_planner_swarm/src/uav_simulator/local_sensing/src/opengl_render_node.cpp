@@ -27,9 +27,9 @@ string file_name, pkg_path;
 std::ofstream myfile, collision_checktime_file;
 deque<double> comp_time_vec;
 
-std::string quad_name;
-int drone_num = 0;
-int drone_id = 0;
+std::string uav_name;
+int uav_num = 0;
+int uav_id = 0;
 
 opengl_pointcloud_render render;
 
@@ -61,7 +61,7 @@ int GLX_SIZE, GLY_SIZE, GLZ_SIZE;
 int plane_interline = 1;
 
 // multi uav variables
-// int drone_id = 0;
+// int uav_id = 0;
 vector<Eigen::Vector3d> other_uav_pos;
 vector<double> other_uav_rcv_time;
 vector<vector<PointType>> otheruav_points, otheruav_points_inrender;
@@ -69,7 +69,7 @@ vector<vector<int>> otheruav_pointsindex, otheruav_pointsindex_inrender;
 pcl::PointCloud<PointType> otheruav_points_vis, dyn_points_vis;
 double uav_size[3];
 int uav_points_num;
-// int drone_num = 0;
+// int uav_num = 0;
 int drone_drawpoints_num[3];
 
 int use_uav_extra_model = 1;
@@ -446,7 +446,7 @@ void rcvOdometryCallbck(const nav_msgs::Odometry& odom)
         ROS_ERROR("ENVIRONMENT COLLISION DETECTED!!!");
       }
     }
-    if(dynobj_enable || drone_num > 1)
+    if(dynobj_enable || uav_num > 1)
     {
       if(kdtree_dyn.radiusSearch(searchPoint, collision_range, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 0)
       {
@@ -497,17 +497,17 @@ void rcvOdometryCallbck(const nav_msgs::Odometry& odom)
 }
 
 // decentralize simualtion, get other uav odometry and generate point clouds
-void multiOdometryCallbck(const nav_msgs::OdometryConstPtr &msg, int drone_id)
+void multiOdometryCallbck(const nav_msgs::OdometryConstPtr &msg, int uav_id)
 {
   Eigen::Vector3d uav_pos;
   uav_pos(0) = msg->pose.pose.position.x;
   uav_pos(1) = msg->pose.pose.position.y;
   uav_pos(2) = msg->pose.pose.position.z;
-  other_uav_pos[drone_id] = uav_pos;
-  other_uav_rcv_time[drone_id] = msg->header.stamp.toSec();
+  other_uav_pos[uav_id] = uav_pos;
+  other_uav_rcv_time[uav_id] = msg->header.stamp.toSec();
 
-  otheruav_points[drone_id].clear();
-  otheruav_pointsindex[drone_id].clear();
+  otheruav_points[uav_id].clear();
+  otheruav_pointsindex[uav_id].clear();
   otheruav_points_vis.clear();
 
   PointType temp_point;
@@ -529,9 +529,9 @@ void multiOdometryCallbck(const nav_msgs::OdometryConstPtr &msg, int drone_id)
           temp_point.x = i * downsample_res + x_min;
           temp_point.y = j * downsample_res + y_min;
           temp_point.z = k * downsample_res + z_min;
-          temp_point.intensity = ((float)(MAX_INTENSITY - MIN_INTENSITY)) * ((drone_id + 1.0) / (float(drone_num))) + MIN_INTENSITY; // set the intensity of the point
-          otheruav_points[drone_id].push_back(temp_point);
-          // otheruav_pointsindex[drone_id].push_back(uavpt_count + origin_mapptcount + 100000 + drone_id * uav_points_num);
+          temp_point.intensity = ((float)(MAX_INTENSITY - MIN_INTENSITY)) * ((uav_id + 1.0) / (float(uav_num))) + MIN_INTENSITY; // set the intensity of the point
+          otheruav_points[uav_id].push_back(temp_point);
+          // otheruav_pointsindex[uav_id].push_back(uavpt_count + origin_mapptcount + 100000 + uav_id * uav_points_num);
           otheruav_points_vis.push_back(temp_point);
           uavpt_count++;
         }
@@ -555,8 +555,8 @@ void multiOdometryCallbck(const nav_msgs::OdometryConstPtr &msg, int drone_id)
           temp_point.x = model_point(0);
           temp_point.y = model_point(1);
           temp_point.z = model_point(2);
-          temp_point.intensity = ((float)(MAX_INTENSITY - MIN_INTENSITY)) * ((drone_id + 1.0) / (float(drone_num))) + MIN_INTENSITY; // set the intensity of the point
-          otheruav_points[drone_id].push_back(temp_point);
+          temp_point.intensity = ((float)(MAX_INTENSITY - MIN_INTENSITY)) * ((uav_id + 1.0) / (float(uav_num))) + MIN_INTENSITY; // set the intensity of the point
+          otheruav_points[uav_id].push_back(temp_point);
           otheruav_points_vis.push_back(temp_point);
           uavpt_count++;
     }
@@ -594,9 +594,9 @@ void renderSensedPoints(const ros::TimerEvent& event)
     local_map->points.clear();
     dynamic_input_points.points.clear();
 
-    for(int i = 0;i < drone_num;i++)
+    for(int i = 1;i <= uav_num;i++)
     {
-      if(i == drone_id)
+      if(i == uav_id)
       {continue;}
       for(int j = 0;j < otheruav_points[i].size();j++)
       {
@@ -634,7 +634,7 @@ void renderSensedPoints(const ros::TimerEvent& event)
       geometry_msgs::PoseStamped totaltime_pub;
       totaltime_pub.pose.position.x = accumulate(comp_time_vec.begin(),comp_time_vec.end(),0.0)/comp_time_vec.size();
       comp_time_pub.publish(totaltime_pub);
-      ROS_INFO("Temp compute time = %lf, average compute time = %lf", comp_time_temp,totaltime_pub.pose.position.x);
+      // ROS_INFO("Temp compute time = %lf, average compute time = %lf", comp_time_temp,totaltime_pub.pose.position.x);
     }else{
       comp_time_count++;
     }
@@ -682,7 +682,7 @@ int main(int argc, char** argv)
   ros::init(argc, argv, "pcl_render");
   ros::NodeHandle nh("~");
 
-  nh.param("quadrotor_name", quad_name, std::string("quadrotor"));
+  nh.param("quadrotor_name", uav_name, std::string("quadrotor"));
   nh.getParam("is_360lidar", is_360lidar);
   nh.getParam("sensing_horizon", sensing_horizon);
   nh.getParam("sensing_rate", sensing_rate);
@@ -721,20 +721,20 @@ int main(int argc, char** argv)
   nh.getParam("map/z_size", z_size);
 
   // subscribe other uav pos
-  nh.param("uav_num", drone_num, 1);
-  nh.param("drone_id", drone_id, 0);
-  other_uav_pos.resize(drone_num);
-  other_uav_rcv_time.resize(drone_num);
-  otheruav_points.resize(drone_num);
-  otheruav_pointsindex.resize(drone_num);
-  ros::Subscriber *subs = new ros::Subscriber[drone_num];
-  for (int i = 0; i < drone_num; i++)
+  nh.param("uav_num", uav_num, 1);
+  nh.param("uav_id", uav_id, 0);
+  other_uav_pos.resize(uav_num + 1);
+  other_uav_rcv_time.resize(uav_num + 1);
+  otheruav_points.resize(uav_num + 1);
+  otheruav_pointsindex.resize(uav_num + 1);
+  ros::Subscriber *subs = new ros::Subscriber[uav_num + 1];
+  for (int i = 1; i <= uav_num; i++)
   {
-    if (i == drone_id)
+    if (i == uav_id)
     {
       continue;
     }
-    string topic = "/quad_";
+    string topic = "/uav";
     topic += to_string(i);
     topic += "/lidar_slam/odom";
     cout << topic << endl;
@@ -746,7 +746,7 @@ int main(int argc, char** argv)
   if(use_uav_extra_model)
   {
     string uav_model_path;
-    uav_model_path = ros::package::getPath("odom_visualization");//= "/home/mars/catkin_ws2/src/Exploration_sim/octomap_mapping/octomap_server"
+    uav_model_path = ros::package::getPath("odom_visualization");
     uav_model_path.append("/meshes/yunque001.pcd");
     std::cout << "\nFound pkg_path = " << uav_model_path << std::endl;
     // myfile.open(pkg_path.c_str(), std::ios_base::out);//, std::ios_base::out
@@ -928,13 +928,13 @@ int main(int argc, char** argv)
 //     myfile.open(pkg_path.c_str(), std::ios_base::out);//, std::ios_base::out
 
   pkg_path = ros::package::getPath("local_sensing_node");  
-  pkg_path.append("/data/" + quad_name + "_GPU_time_consumption.txt");
+  pkg_path.append("/data/" + uav_name + "_GPU_time_consumption.txt");
   std::cout << "\nFound pkg_path = " << pkg_path << std::endl;
   myfile.open(pkg_path.c_str(), std::ios_base::out); 
 
   // open file to record collision check time consumption
   pkg_path = ros::package::getPath("local_sensing_node");
-  pkg_path.append("/data/" + quad_name + "_GPU_collision_check_time_consumption.txt");
+  pkg_path.append("/data/" + uav_name + "_GPU_collision_check_time_consumption.txt");
   std::cout << "\nFound pkg_path = " << pkg_path << std::endl;
   collision_checktime_file.open(pkg_path.c_str(), std::ios_base::out);
 
