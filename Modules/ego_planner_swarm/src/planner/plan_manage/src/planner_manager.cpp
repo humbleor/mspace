@@ -297,38 +297,23 @@ namespace ego_planner
     pos.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_, pp_.feasibility_tolerance_);
 
     /*** STEP 3: REFINE(RE-ALLOCATE TIME) IF NECESSARY ***/
-    // Note: Only adjust time in single drone mode. But we still allow drone_0 to adjust its time profile.
-    // ego默认从0开始，我们默认从1开始，因此这里<=1
-    if (pp_.drone_id <= 1)
+    double ratio;
+    bool flag_step_2_success = true;
+    if (!pos.checkFeasibility(ratio, false))
     {
+      cout << "Need to reallocate time." << endl;
 
-      double ratio;
-      bool flag_step_2_success = true;
-      if (!pos.checkFeasibility(ratio, false))
-      {
-        cout << "Need to reallocate time." << endl;
-
-        Eigen::MatrixXd optimal_control_points;
-        flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
-        if (flag_step_2_success)
-          pos = UniformBspline(optimal_control_points, 3, ts);
-      }
-
-      if (!flag_step_2_success)
-      {
-        printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
-        continous_failures_count_++;
-        return false;
-      }
+      Eigen::MatrixXd optimal_control_points;
+      flag_step_2_success = refineTrajAlgo(pos, start_end_derivatives, ratio, ts, optimal_control_points);
+      if (flag_step_2_success)
+        pos = UniformBspline(optimal_control_points, 3, ts);
     }
-    else
+
+    if (!flag_step_2_success)
     {
-      static bool print_once = true;
-      if (print_once)
-      {
-        print_once = false;
-        ROS_ERROR("IN SWARM MODE, REFINE DISABLED!");
-      }
+      printf("\033[34mThis refined trajectory hits obstacles. It doesn't matter if appeares occasionally. But if continously appearing, Increase parameter \"lambda_fitness\".\n\033[0m");
+      continous_failures_count_++;
+      return false;
     }
 
     t_refine = ros::Time::now() - t_start;

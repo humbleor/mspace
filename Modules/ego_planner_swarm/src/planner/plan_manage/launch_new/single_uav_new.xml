@@ -144,7 +144,7 @@
             <remap from="~global_map" to="/map_generator/global_cloud"/>
             <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
             <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-            <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+            <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
             <param name="uav_id" value="$(arg uav_id)"/>
             <param name="quadrotor_name" value="uav$(arg uav_id)"/>
@@ -187,7 +187,7 @@
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+                <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
                 <param name="uav_id" value="$(arg uav_id)"/>
                 <param name="quadrotor_name" value="uav$(arg uav_id)"/>
@@ -230,7 +230,7 @@
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+                <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
                 <param name="uav_id" value="$(arg uav_id)"/>
                 <param name="quadrotor_name" value="uav$(arg uav_id)"/>
@@ -273,12 +273,12 @@
     <group unless="$(arg use_gpu)">
         <!-- Livox Avia launch-prefix="gdb -ex run -args" -->
         <group if="$(eval lidar_type == 'avia')">
-            <node pkg="local_sensing_node" type="pointcloud_render_node" name="uav_$(arg uav_id)_pcl_render_node"
-                output="screen">
+            <node pkg="local_sensing_node" type="pointcloud_render_node" 
+                name="uav_$(arg uav_id)_pcl_render_node" output="screen">
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+                <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
                 <param name="uav_id" value="$(arg uav_id)"/>
                 <param name="quadrotor_name" value="uav$(arg uav_id)"/>
@@ -324,7 +324,7 @@ launch-prefix="gdb --ex run -args"
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+                <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
                 <param name="uav_id" value="$(arg uav_id)"/>
                 <param name="quadrotor_name" value="uav$(arg uav_id)"/>
@@ -367,7 +367,7 @@ launch-prefix="gdb --ex run -args"
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
-                <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/>
+                <!-- <remap from="~depth_img" to="/uav$(arg uav_id)/$(arg depth_topic)"/> -->
 
                 <param name="uav_id" value="$(arg uav_id)"/>
                 <param name="quadrotor_name" value="uav$(arg uav_id)"/>

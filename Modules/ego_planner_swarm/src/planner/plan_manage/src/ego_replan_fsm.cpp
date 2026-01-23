@@ -169,7 +169,7 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
-    // sleep(45);
+    sleep(45);
   }
 
   int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 
@@ -504,18 +504,24 @@ namespace ego_planner
       return;
     }
 
-    if (msg->traj[0].order != 3) // only support B-spline order equals 3.
-    {
-      ROS_ERROR("Only support B-spline order equals 3.");
-      return;
-    }
-
     // Step 1. receive the trajectories
     planner_manager_->swarm_trajs_buf_.clear();
     planner_manager_->swarm_trajs_buf_.resize(msg->traj.size());
 
     for (size_t i = 0; i < msg->traj.size(); i++)
     {
+      if (msg->traj[i].pos_pts.size() == 0)
+      {
+        planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
+        continue;
+      }
+
+      if (msg->traj[i].order != 3) // only support B-spline order equals 3.
+      {
+        ROS_ERROR("Only support B-spline order equals 3.");
+        planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
+        continue;
+      }
 
       Eigen::Vector3d cp0(msg->traj[i].pos_pts[0].x, msg->traj[i].pos_pts[0].y, msg->traj[i].pos_pts[0].z);
       Eigen::Vector3d cp1(msg->traj[i].pos_pts[1].x, msg->traj[i].pos_pts[1].y, msg->traj[i].pos_pts[1].z);
@@ -1020,6 +1026,11 @@ namespace ego_planner
       }
       else if ((int)multi_bspline_msgs_buf_.traj.size() == planner_manager_->pp_.drone_id)
       {
+        multi_bspline_msgs_buf_.traj.push_back(bspline);
+      }
+      else if (planner_manager_->pp_.drone_id == 1 && (int)multi_bspline_msgs_buf_.traj.size() == 0)
+      {
+        multi_bspline_msgs_buf_.traj.push_back(traj_utils::Bspline());
         multi_bspline_msgs_buf_.traj.push_back(bspline);
       }
       else
