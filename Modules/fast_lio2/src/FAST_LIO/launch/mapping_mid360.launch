@@ -12,6 +12,8 @@
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
 
 	<remap from="/drone_cloud_bizhang" to="/uav$(arg uav_id)/drone_cloud_bizhang"/>
+	<!-- <remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/> -->
+	<remap from="/drone_Odom_high_freq" to="/uav$(arg uav_id)/drone_Odometry"/>
 
     <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen" /> 
 

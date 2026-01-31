@@ -175,8 +175,9 @@ void timercb_vision(const ros::TimerEvent &e)
             pub_message(message_pub, prometheus_msgs::Message::ERROR, msg_name, "Mocap Timeout.");
         }
 
-    }//faster-lio
-     else if (input_source == 1)
+    }
+    //faster-lio
+    else if (input_source == 1)
     {
         vision.pose.position.x = pos_drone_lidar[0];
         vision.pose.position.y = pos_drone_lidar[1];
@@ -187,6 +188,7 @@ void timercb_vision(const ros::TimerEvent &e)
         vision.pose.orientation.z = q_lidar.z();
         vision.pose.orientation.w = q_lidar.w();
     }
+    // gazebo
     else if (input_source == 2)
     {
         vision.pose.position.x = pos_drone_gazebo[0];
@@ -198,6 +200,7 @@ void timercb_vision(const ros::TimerEvent &e)
         vision.pose.orientation.z = q_gazebo.z();
         vision.pose.orientation.w = q_gazebo.w();
     }
+    // t265
     else if (input_source == 3)
     {
         vision.pose.position.x = pos_drone_t265[0];
@@ -208,8 +211,9 @@ void timercb_vision(const ros::TimerEvent &e)
         vision.pose.orientation.y = q_t265.y();
         vision.pose.orientation.z = q_t265.z();
         vision.pose.orientation.w = q_t265.w();
-    }//fast-lio2
-     else if (input_source == 4)
+    }
+    //fast-lio2
+    else if (input_source == 4)
     {
         vision.pose.position.x = pos_drone_lidar_fastlio2[0];
         vision.pose.position.y = pos_drone_lidar_fastlio2[1];
@@ -324,20 +328,35 @@ int main(int argc, char **argv)
     // 【订阅】无人机相对高度 此订阅仅针对户外实验
     alt_sub = nh.subscribe<std_msgs::Float64>(uav_name + "/mavros/global_position/rel_alt", 10, alt_cb);
 
-    // 【订阅】t265估计位置
-    t265_sub = nh.subscribe<nav_msgs::Odometry>("/t265/odom/sample", 100, t265_cb);
-
-    // 【订阅】faster-lio估计位置
-    lidar_sub = nh.subscribe<nav_msgs::Odometry>("/Odometry", 100, lidar_cb);
-
-    // 【订阅】fast-lio2估计位置
-    lidar_fastlio2_sub = nh.subscribe<nav_msgs::Odometry>("/drone_Odometry", 100, lidar_fastlio2_cb);
-    
-    // 【订阅】mocap估计位置
-    mocap_sub = nh.subscribe<geometry_msgs::PoseStamped>("/vrpn_client_node"+ uav_name + "/pose", 10, mocap_cb);
-
-    // 【订阅】gazebo仿真真值
-    gazebo_sub = nh.subscribe<nav_msgs::Odometry>(uav_name + "/prometheus/ground_truth", 10, gazebo_cb);
+    if (input_source == 0) {
+        // 【订阅】mocap估计位置
+        mocap_sub = nh.subscribe<geometry_msgs::PoseStamped>("/vrpn_client_node"+ uav_name + "/pose", 10, mocap_cb);
+    }
+    else if (input_source == 1)
+    {
+        // 【订阅】faster-lio估计位置
+        lidar_sub = nh.subscribe<nav_msgs::Odometry>("/Odometry", 100, lidar_cb);
+    }
+    else if (input_source == 2)
+    {
+        // 【订阅】gazebo仿真真值
+        gazebo_sub = nh.subscribe<nav_msgs::Odometry>(uav_name + "/prometheus/ground_truth", 10, gazebo_cb);
+    }
+    else if (input_source == 3)
+    {
+        // 【订阅】t265估计位置
+        t265_sub = nh.subscribe<nav_msgs::Odometry>("/t265/odom/sample", 100, t265_cb);
+    }
+    //fast-lio2
+    else if (input_source == 4)
+    {
+        // 【订阅】fast-lio2估计位置
+        lidar_fastlio2_sub = nh.subscribe<nav_msgs::Odometry>("/drone_Odometry", 100, lidar_fastlio2_cb);
+    }
+    else
+    {
+        pub_message(message_pub, prometheus_msgs::Message::NORMAL, msg_name, "Wrong input_source.");
+    }
 
     // 【发布】无人机位置和偏航角 坐标系 ENU系
     //  本话题要发送飞控(通过mavros_extras/src/plugins/vision_pose_estimate.cpp发送), 对应Mavlink消息为VISION_POSITION_ESTIMATE(#102), 对应的飞控中的uORB消息为vehicle_vision_position.msg 及 vehicle_vision_attitude.msg

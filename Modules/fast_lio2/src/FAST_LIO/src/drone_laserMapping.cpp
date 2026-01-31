@@ -80,6 +80,7 @@ bool runtime_pos_log = false, pcd_save_en = false, time_sync_en = false, extrins
 float res_last[100000] = {0.0};
 float DET_RANGE = 300.0f;
 const float MOV_THRESHOLD = 1.5f;
+double time_diff_lidar_to_imu = 0.0;
 
 mutex mtx_buffer;
 condition_variable sig_buffer;
@@ -141,6 +142,58 @@ geometry_msgs::PoseStamped msg_body_pose;
 
 shared_ptr<Preprocess> p_pre(new Preprocess());
 shared_ptr<ImuProcess> p_imu(new ImuProcess());
+
+ros::Publisher odomHigh_speed;
+double latest_time;
+V3D latest_P, latest_V, latest_Ba, latest_Bg, latest_acc_0, latest_gyr_0,acc_0,gyr_0;
+M3D latest_Q;
+bool init = false;
+
+void updateLatestStates(){
+    latest_time = lidar_end_time;
+    latest_P = state_point.pos;
+    latest_Q = state_point.rot;
+    latest_V = state_point.vel;
+    latest_Ba = state_point.ba;
+    latest_Bg = state_point.bg;
+    // latest_acc_0 = acc_0;
+    // latest_gyr_0 = gyr_0;
+}
+
+void fastPredictIMU(double t, V3D acc, V3D gyr)
+{
+    double dt = t - latest_time;
+    latest_time = t;
+    V3D un_acc_0 = latest_Q * (latest_acc_0 - latest_Ba) + V3D(state_point.grav[0],state_point.grav[1],state_point.grav[2]);
+    V3D un_gyr = 0.5 * (latest_gyr_0 + gyr) - latest_Bg;
+    latest_Q = latest_Q * Exp(un_gyr, dt);
+    V3D un_acc_1 = latest_Q * (acc - latest_Ba) + V3D(state_point.grav[0],state_point.grav[1],state_point.grav[2]);
+    V3D un_acc = 0.5 * (un_acc_0 + un_acc_1);
+    latest_P = latest_P + dt * latest_V + 0.5 * dt * dt * un_acc;
+    latest_V = latest_V + dt * un_acc;
+    latest_acc_0 = acc;
+    latest_gyr_0 = gyr;
+    nav_msgs::Odometry odomHigh;
+    Eigen::Quaterniond quadrotor_Q = Eigen::Quaterniond(latest_Q);
+    odomHigh.header.stamp =ros::Time().fromSec(t);
+    odomHigh.header.frame_id = "world";
+    odomHigh.child_frame_id = "odom_imu";
+    odomHigh.pose.pose.position.x = latest_P.x();
+    odomHigh.pose.pose.position.y = latest_P.y();
+    odomHigh.pose.pose.position.z = latest_P.z();
+    odomHigh.pose.pose.orientation.x = quadrotor_Q.x();
+    odomHigh.pose.pose.orientation.y = quadrotor_Q.y();
+    odomHigh.pose.pose.orientation.z = quadrotor_Q.z();
+    odomHigh.pose.pose.orientation.w = quadrotor_Q.w();
+    odomHigh.twist.twist.linear.x = latest_V.x();
+    odomHigh.twist.twist.linear.y = latest_V.y();
+    odomHigh.twist.twist.linear.z = latest_V.z();
+    odomHigh.twist.twist.angular.x = gyr.x() - state_point.bg.x();
+    odomHigh.twist.twist.angular.y = gyr.y() - state_point.bg.y();
+    odomHigh.twist.twist.angular.z = gyr.z() - state_point.bg.z();
+
+    odomHigh_speed.publish(odomHigh);    
+}
 
 void SigHandle(int sig)
 {
@@ -486,6 +539,7 @@ void map_incremental()
 
 // PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI(500000, 1));
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
+
 PointCloudXYZI::Ptr pcl_bizhangout(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_bizhang2_filter(new PointCloudXYZI());
 int flag_10times = 0, flag_times = 0;
@@ -605,7 +659,7 @@ void publish_cloud_bizhangfun(const ros::Publisher &publish_cloud_bizhang) {
     publish_count -= PUBFRAME_PERIOD;
 }
 
-void publish_frame_world(const ros::Publisher &pubLaserCloudFull, const ros::Publisher &pubLaserCloudFull_zmax)
+void publish_frame_world(const ros::Publisher &pubLaserCloudFull)
 {
     if (scan_pub_en)
     {
@@ -627,24 +681,22 @@ void publish_frame_world(const ros::Publisher &pubLaserCloudFull, const ros::Pub
         pubLaserCloudFull.publish(laserCloudmsg);
         publish_count -= PUBFRAME_PERIOD;
 
-        for (int i = 0; i < size; i++)
-        {
-            if (laserCloudWorld->points[i].z > p_pre->z_max)
-            {
+    //     for (int i = 0; i < size; i++)
+    //     {
+    //         if (laserCloudWorld->points[i].z > p_pre->z_max)
+    //         {
+    //             laserCloudWorld->points[i] = laserCloudWorld->points[0];
+    //         }
+    //     }
+    //     // bnb 323
+    //     sensor_msgs::PointCloud2 laserCloudmsg_zmax;
+    //     pcl::toROSMsg(*laserCloudWorld, laserCloudmsg_zmax);
 
-                laserCloudWorld->points[i] = laserCloudWorld->points[0];
-            }
-        }
-        // bnb 323
-        sensor_msgs::PointCloud2 laserCloudmsg_zmax;
-        pcl::toROSMsg(*laserCloudWorld, laserCloudmsg_zmax);
-
-        laserCloudmsg_zmax.header.stamp = ros::Time().fromSec(lidar_end_time);
-        laserCloudmsg_zmax.header.frame_id = "world";
-        pubLaserCloudFull_zmax.publish(laserCloudmsg_zmax);
-        publish_count -= PUBFRAME_PERIOD;
+    //     laserCloudmsg_zmax.header.stamp = ros::Time().fromSec(lidar_end_time);
+    //     laserCloudmsg_zmax.header.frame_id = "world";
+    //     pubLaserCloudFull_zmax.publish(laserCloudmsg_zmax);
+    //     publish_count -= PUBFRAME_PERIOD;
     }
-    // bnb
 
     /**************** save map ****************/
     /* 1. make sure you have enough memories
@@ -775,7 +827,7 @@ void publish_path(const ros::Publisher pubPath)
     /*** if path is too large, the rvis will crash ***/
     static int jjj = 0;
     jjj++;
-    if (jjj % 1 == 0)
+    if (jjj % 10 == 0)
     {
         path.poses.push_back(msg_body_pose);
         pubPath.publish(path);
@@ -845,8 +897,7 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
         if (!point_selected_surf[i])
             continue;
 
-        VF(4)
-        pabcd;
+        VF(4) pabcd;
         point_selected_surf[i] = false;
         if (esti_plane(pabcd, points_near, 0.1f))
         {
@@ -941,6 +992,7 @@ int main(int argc, char **argv)
     nh.param<string>("common/lid_topic", lid_topic, "/livox/lidar");
     nh.param<string>("common/imu_topic", imu_topic, "/livox/imu");
     nh.param<bool>("common/time_sync_en", time_sync_en, false);
+    nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
     nh.param<double>("filter_size_corner", filter_size_corner_min, 0.5);
     nh.param<double>("filter_size_surf", filter_size_surf_min, 0.5);
     nh.param<double>("filter_size_map", filter_size_map_min, 0.5);
@@ -1016,14 +1068,15 @@ int main(int argc, char **argv)
     /*** ROS subscribe initialization ***/
     ros::Subscriber sub_pcl = p_pre->lidar_type == AVIA ? nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : nh.subscribe(lid_topic, 200000, standard_pcl_cbk);
     ros::Subscriber sub_imu = nh.subscribe(imu_topic, 200000, imu_cbk);
-    ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered", 50);
-    ros::Publisher pubLaserCloudFull_zmax = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_zmax", 50);
-    ros::Publisher publish_cloud_bizhang = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_bizhang", 50);
-    ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_body", 20);
-    ros::Publisher pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_effected", 50);
-    ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/drone_Laser_map", 50);
-    ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/drone_Odometry", 50);
-    ros::Publisher pubPath = nh.advertise<nav_msgs::Path>("/drone_path", 10);
+    ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered", 100000);
+    // ros::Publisher pubLaserCloudFull_zmax = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_zmax", 100000);
+    ros::Publisher publish_cloud_bizhang = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_bizhang", 100000);
+    ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_body", 100000);
+    ros::Publisher pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_effected", 100000);
+    ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/drone_Laser_map", 100000);
+    ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry>("/drone_Odometry", 100000);
+    odomHigh_speed = nh.advertise<nav_msgs::Odometry>("/drone_Odom_high_freq",10000);
+    ros::Publisher pubPath = nh.advertise<nav_msgs::Path>("/drone_path", 100000);
     //------------------------------------------------------------------------------------------------------
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
@@ -1134,6 +1187,9 @@ int main(int argc, char **argv)
 
             double t_update_end = omp_get_wtime();
 
+            init = true;
+            updateLatestStates();
+
             /******* Publish odometry *******/
             publish_odometry(pubOdomAftMapped);
 
@@ -1146,7 +1202,7 @@ int main(int argc, char **argv)
             if (path_en)
                 publish_path(pubPath);
             if (scan_pub_en || pcd_save_en)
-                publish_frame_world(pubLaserCloudFull, pubLaserCloudFull_zmax);
+                publish_frame_world(pubLaserCloudFull);
             if (scan_pub_en && scan_body_pub_en)
                 publish_frame_body(pubLaserCloudFull_body);
             publish_cloud_bizhangfun(publish_cloud_bizhang);

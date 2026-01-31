@@ -34,6 +34,7 @@
 		<param name="uav_id" value="$(arg uav_id)"/>
 		<!-- 控制器tips: 0 for traj(位置+速度控制) ,1 for pos ,2 for XY_VEL_Z_POS-->
 		<param name="control_flag" value="0"/>
+		<remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/>
 	</node>
 	
 </launch>

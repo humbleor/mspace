@@ -75,7 +75,7 @@
     <arg name="step_Y" value="3.0"/>
     <arg name="step_Z" value="2.0"/>
 
-    <arg name="waypointDistriFlag" value="2"/>
+    <arg name="waypointDistriFlag" value="0"/>
     <arg name="coordinate_X" value="1.5"/> 
     <arg name="coordinate_Y" value="1.5"/>
     <arg name="minZ_rotate" value="2.0"/> 
