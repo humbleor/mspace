@@ -342,7 +342,7 @@ namespace ego_planner
       }
 
       // 发布GlobalPath用于显示 "/uav_x_ego_planner_node/global_list" - [GlobalPath,大小,id]
-      visualization_->displayGlobalPathList(gloabl_traj, 0.1, wp_id_);
+      visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
     }
     else
     {

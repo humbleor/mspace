@@ -177,7 +177,7 @@ void fastPredictIMU(double t, V3D acc, V3D gyr)
     Eigen::Quaterniond quadrotor_Q = Eigen::Quaterniond(latest_Q);
     odomHigh.header.stamp =ros::Time().fromSec(t);
     odomHigh.header.frame_id = "world";
-    odomHigh.child_frame_id = "odom_imu";
+    odomHigh.child_frame_id = "base_link";
     odomHigh.pose.pose.position.x = latest_P.x();
     odomHigh.pose.pose.position.y = latest_P.y();
     odomHigh.pose.pose.position.z = latest_P.z();
@@ -402,6 +402,18 @@ void imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     publish_count++;
     // cout<<"IMU got at: "<<msg_in->header.stamp.toSec()<<endl;
     sensor_msgs::Imu::Ptr msg(new sensor_msgs::Imu(*msg_in));
+
+    msg->linear_acceleration.x *= G_m_s2;
+    msg->linear_acceleration.y *= G_m_s2;
+    msg->linear_acceleration.z *= G_m_s2;
+
+    if(init)
+    {
+        fastPredictIMU(msg->header.stamp.toSec(),
+                V3D(msg->linear_acceleration.x,msg->linear_acceleration.y,msg->linear_acceleration.z),
+                V3D(msg->angular_velocity.x,msg->angular_velocity.y,msg->angular_velocity.z));
+    }
+    msg->header.stamp = ros::Time().fromSec(msg_in->header.stamp.toSec() - time_diff_lidar_to_imu);
 
     if (abs(timediff_lidar_wrt_imu) > 0.1 && time_sync_en)
     {

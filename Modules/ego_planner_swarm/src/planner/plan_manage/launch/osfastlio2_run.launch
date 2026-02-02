@@ -9,7 +9,8 @@
   <arg name="obj_num" value="10" />
 
   <!-- topic of your odometry such as VIO or LIO -->
-  <arg name="odom_topic" value="/mavros/local_position/odom" />
+  <arg name="odom_topic" value="mavros/local_position/odom" />
+  <!-- <arg name="odom_topic" value="/drone_Odometry" /> -->
 
   <!-- main algorithm params -->
   <include file="$(find ego_planner)/launch/advanced_param_px4.xml">
