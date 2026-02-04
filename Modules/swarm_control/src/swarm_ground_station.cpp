@@ -49,7 +49,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "swarm_ground_station");
     ros::NodeHandle nh("~");
 
-    nh.param<int>("swarm_num_uav", swarm_num_uav, 1);
+    nh.param<int>("swarm_num", swarm_num_uav, 1);
 
     for(int i = 1; i <= swarm_num_uav; i++) 
     {

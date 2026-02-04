@@ -46,7 +46,6 @@ ros::Publisher ego_pos_rviz_ref_pub;
 
 geometry_msgs::Pose to_quaternion(double pitch, double roll, double yaw)
 {
-
     double t0, t1, t2, t3, t4, t5;
     t0 = cos(yaw * 0.5);
     t1 = sin(yaw * 0.5);
@@ -59,8 +58,8 @@ geometry_msgs::Pose to_quaternion(double pitch, double roll, double yaw)
     q.orientation.y = t0 * t2 * t5 + t1 * t3 * t4;
     q.orientation.z = t1 * t2 * t4 - t0 * t3 * t5;
     return q;
-
 }
+
 void ego_ouput_cb(const quadrotor_msgs::PositionCommand::ConstPtr& msg)
 {
     ego_traj_cmd = *msg;
@@ -118,6 +117,7 @@ void ego_ouput_cb(const quadrotor_msgs::PositionCommand::ConstPtr& msg)
         command_pub.publish(Command_Now);   
     }
 }
+
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>主 函 数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 int main(int argc, char **argv)
 {

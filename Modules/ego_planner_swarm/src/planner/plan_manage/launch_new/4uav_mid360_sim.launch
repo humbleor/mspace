@@ -46,7 +46,7 @@
   </group>
 
   <!-- UAV 1 -->
-  <include file="$(find ego_planner)/launch_new/single_uav_new.xml">
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="1"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
     <arg name="lidar_type" value="mid360"/>
@@ -87,7 +87,7 @@
   </include>
 
   <!-- UAV 2 -->
-  <include file="$(find ego_planner)/launch_new/single_uav_new.xml">
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="2"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
     <arg name="lidar_type" value="mid360"/>
@@ -127,7 +127,7 @@
   </include>
 
    <!-- UAV 3 -->
-  <include file="$(find ego_planner)/launch_new/single_uav_new.xml">
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="3"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
     <arg name="lidar_type" value="mid360"/>
@@ -167,7 +167,7 @@
   </include>
 
    <!-- UAV 4 -->
-  <include file="$(find ego_planner)/launch_new/single_uav_new.xml">
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="4"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
     <arg name="lidar_type" value="mid360"/>

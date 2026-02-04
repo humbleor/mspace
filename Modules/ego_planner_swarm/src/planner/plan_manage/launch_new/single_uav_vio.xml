@@ -57,7 +57,7 @@
     <!-- ========================================================== -->
     <!-- 1. Main Algorithm (Planner) -->
     <!-- ========================================================== -->
-    <include file="$(find ego_planner)/launch/advanced_param_px4.xml">
+    <include file="$(find ego_planner)/launch_new/advanced_param_px4.xml">
         <arg name="uav_id" value="$(arg uav_id)"/>
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
         <arg name="map_size_y_" value="$(arg map_size_y)"/>

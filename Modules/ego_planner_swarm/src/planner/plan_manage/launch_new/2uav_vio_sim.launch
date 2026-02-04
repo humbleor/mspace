@@ -1,18 +1,15 @@
 <launch>
-  <arg name="use_gpu_" value="false"/>
-
   <!-- size of map, change the size inflate x, y, z according to your application -->
   <arg name="map_size_x" value="100.0"/>
   <arg name="map_size_y" value="100.0"/>
   <arg name="map_size_z" value="10.0"/>
-
-   <!-- uav_id must start from 1 -->
-  <arg name="uav_id_1" value="1"/>
-  <arg name="uav_num" value="1"/>
-
   <arg name="init_x" value="0.0"/>
   <arg name="init_y" value="0.0"/>
-  <arg name="init_z" value="0.5"/>
+  <arg name="init_z" value="0.1"/>
+
+  <arg name="uav_id_1" value="1"/>
+  <arg name="uav_id_2" value="2"/>
+  <arg name="uav_num" value="2"/>
 
   <arg name="frame_id" value="world"/>
   <arg name="global_cloud_topic" value="/map_generator/global_cloud"/>
@@ -23,6 +20,7 @@
   <arg name="obj_num" value="10" />
 
   <!-- map -->
+  <arg name="use_gpu_" value="false"/>
   <arg name="map_name" value="$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/> <!-- use your pcd file -->
   <arg name="downsample_resolution" value="0.1"/>
   <arg name="use_uav_extra_model" value = "0"/>
@@ -47,10 +45,9 @@
   </group>
 
   <!-- UAV 1 -->
-  <include file="$(find ego_planner)/launch_new/single_uav_new.xml">
+  <include file="$(find ego_planner)/launch_new/single_uav_vio.xml">
     <arg name="uav_id" value="$(arg uav_id_1)"/>
-    <arg name="uav_num_" value="$(arg uav_num)"/>
-    <arg name="lidar_type" value="mid360"/>
+    <arg name="uav_num" value="$(arg uav_num)"/>
     <arg name="init_x" value="$(arg init_x)"/>
     <arg name="init_y" value="$(arg init_y)"/>
     <arg name="init_z" value="$(arg init_z)"/>
@@ -58,21 +55,19 @@
     <arg name="map_size_y" value="$(arg map_size_y)"/>
     <arg name="map_size_z" value="$(arg map_size_z)"/>
     <arg name="map_name" value="$(arg map_name)"/>
+    <arg name="downsample_resolution" value="$(arg downsample_resolution)"/>
     <arg name="odom_topic" value="$(arg odom_topic)"/>
     <arg name="obj_num" value="$(arg obj_num)"/>
-    <arg name="use_gpu" value="$(arg use_gpu_)"/>
-    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
-    <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
     
     <!-- Path Generation Params for UAV 1 -->
-    <arg name="box_min_x" value="0.0"/>
+    <arg name="box_min_x" value="1.0"/>
     <arg name="box_min_y" value="0.0"/>
     <arg name="box_min_z" value="2.0"/>
     <arg name="box_max_x" value="10.0"/>
-    <arg name="box_max_y" value="10.0"/>
+    <arg name="box_max_y" value="2.0"/>
     <arg name="box_max_z" value="3.0"/>
     <arg name="step_X" value="3.0"/>
-    <arg name="step_Y" value="3.0"/>
+    <arg name="step_Y" value="1.0"/>
     <arg name="step_Z" value="2.0"/>
 
     <arg name="waypointDistriFlag" value="0"/>
@@ -80,11 +75,47 @@
     <arg name="coordinate_Y" value="1.5"/>
     <arg name="minZ_rotate" value="2.0"/> 
     <arg name="maxZ_rotate" value="10"/>    
-    <arg name="radius_R" value="2.0"/>
+    <arg name="radius_R" value="1.7"/>
     <arg name="numSpiralSegments" value="4"/>
     <arg name="stepZ_rotate" value="0.5"/>
     <arg name="flight_type" value="3" />
+  </include>
 
+  <!-- UAV 2 -->
+  <include file="$(find ego_planner)/launch_new/single_uav_vio.xml">
+    <arg name="uav_id" value="$(arg uav_id_2)"/>
+    <arg name="uav_num" value="$(arg uav_num)"/>
+    <arg name="init_x" value="$(arg init_x)"/>
+    <arg name="init_y" value="5.0"/>
+    <arg name="init_z" value="$(arg init_z)"/>
+    <arg name="map_size_x" value="$(arg map_size_x)"/>
+    <arg name="map_size_y" value="$(arg map_size_y)"/>
+    <arg name="map_size_z" value="$(arg map_size_z)"/>
+    <arg name="map_name" value="$(arg map_name)"/>
+    <arg name="downsample_resolution" value="$(arg downsample_resolution)"/>
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num" value="$(arg obj_num)"/>
+    
+    <!-- Path Generation Params for UAV 2 -->
+    <arg name="box_min_x" value="1.0"/>
+    <arg name="box_min_y" value="5.0"/>
+    <arg name="box_min_z" value="2.0"/>
+    <arg name="box_max_x" value="10.0"/>
+    <arg name="box_max_y" value="7.0"/>
+    <arg name="box_max_z" value="3.0"/>
+    <arg name="step_X" value="3.0"/>
+    <arg name="step_Y" value="1.0"/>
+    <arg name="step_Z" value="2.0"/>
+    
+    <arg name="waypointDistriFlag" value="0"/>
+    <arg name="coordinate_X" value="1.5"/> 
+    <arg name="coordinate_Y" value="1.5"/>
+    <arg name="minZ_rotate" value="2.0"/> 
+    <arg name="maxZ_rotate" value="10"/>    
+    <arg name="radius_R" value="1.7"/>
+    <arg name="numSpiralSegments" value="4"/>
+    <arg name="stepZ_rotate" value="0.5"/>
+    <arg name="flight_type" value="3" />
   </include>
 
   <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"

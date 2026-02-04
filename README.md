@@ -32,26 +32,14 @@ cd mspace
 
 ## 3. Usage
 
-### 3.1 Simulation (PX4 + Gazebo)
-
-To run the simulation, you must first set up the PX4 firmware (v1.13.2).
-
-#### Environment Setup
-
-```bash
-# Clone PX4 Autopilot
-git clone https://github.com/humbleor/PX4_Firmware.git
-# Update submodules
-git submodule update --init --recursive
-# Build SITL
-make px4_sitl_default gazebo
-```
+### 3.1 Simulation
 
 #### Start Simulation
 ```bash
-roslaunch 
+roslaunch ego_planner 1uav_mid360_sim.launch
+roslaunch ego_planner 1uav_os128_sim.launch
+roslaunch ego_planner 4uav_mid360_sim.launch
 ```
-
 
 ---
 
