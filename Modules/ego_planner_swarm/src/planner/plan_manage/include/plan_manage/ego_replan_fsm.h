@@ -104,6 +104,7 @@ namespace ego_planner
     void readGivenWps();
     void planNextWaypoint(const Eigen::Vector3d next_wp);
     void getLocalTarget();
+    bool checkAndFixTarget(Eigen::Vector3d &target);
     void generateWps();
     // 水平方向遍历
     int generateGridWaypoints(double minX, double maxX, double minY, double maxY, double minZ, double maxZ, double stepX, double stepY,double stepZ);

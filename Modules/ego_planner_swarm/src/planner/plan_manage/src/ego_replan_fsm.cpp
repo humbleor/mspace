@@ -261,7 +261,7 @@ namespace ego_planner
 
   int EGOReplanFSM::generateSpiralWaypoints(
     double X, double Y, double R, int numSpiralSegments, double minZ, double maxZ, double stepZ)
-{
+  {
     // 1. 生成 2D 圆周点
     std::vector<Eigen::Vector2d> circle_points;
     double deltaAngle = 2 * M_PI / numSpiralSegments;
@@ -294,7 +294,94 @@ namespace ego_planner
     }
 
     return wp_cnt;
-}
+  }
+
+  bool EGOReplanFSM::checkAndFixTarget(Eigen::Vector3d &target)
+  {
+    if (planner_manager_->grid_map_->getInflateOccupancy(target) == 0)
+      return true;
+
+    ROS_WARN("Target [%f, %f, %f] is in obstacle, using BFS to find nearest free point...", 
+             target(0), target(1), target(2));
+
+    Eigen::Vector3i center_idx;
+    planner_manager_->grid_map_->posToIndex(target, center_idx);
+
+    double res = planner_manager_->grid_map_->getResolution();
+    cout<<"grid map:"<<res<<endl;
+    int search_radius_idx = 20; // Default for res=0.1
+    if (res > 0.0) {
+        search_radius_idx = ceil(4.0 / res);
+    }
+    
+    std::queue<Eigen::Vector3i> q;
+    q.push(center_idx);
+
+    // Visited map using relative coordinates to save space
+    int dim = 2 * search_radius_idx + 1;
+    std::vector<bool> visited(dim * dim * dim, false);
+
+    // Lambda to get flat index for relative position
+    auto getVisitedIdx = [&](const Eigen::Vector3i& idx) {
+        int x = idx(0) - center_idx(0) + search_radius_idx;
+        int y = idx(1) - center_idx(1) + search_radius_idx;
+        int z = idx(2) - center_idx(2) + search_radius_idx;
+        return x * dim * dim + y * dim + z;
+    };
+
+    // Lambda to check if index is within search box
+    auto isValidIdx = [&](const Eigen::Vector3i& idx) {
+        int x = idx(0) - center_idx(0);
+        int y = idx(1) - center_idx(1);
+        int z = idx(2) - center_idx(2);
+        return abs(x) <= search_radius_idx && abs(y) <= search_radius_idx && abs(z) <= search_radius_idx;
+    };
+
+    // Mark center as visited
+    if (isValidIdx(center_idx)) {
+        visited[getVisitedIdx(center_idx)] = true;
+    }
+
+    // 6-connectivity neighbors
+    const int dx[6] = {1, -1, 0, 0, 0, 0};
+    const int dy[6] = {0, 0, 1, -1, 0, 0};
+    const int dz[6] = {0, 0, 0, 0, 1, -1};
+
+    int loop_limit = 10000; // Safety break
+    int count = 0;
+
+    while (!q.empty() && count++ < loop_limit) {
+        Eigen::Vector3i curr_idx = q.front();
+        q.pop();
+
+        // Check if index is valid in grid map
+        if (planner_manager_->grid_map_->isInMap(curr_idx)) {
+             if (!planner_manager_->grid_map_->isKnownOccupied(curr_idx)) {
+                 Eigen::Vector3d new_target;
+                 planner_manager_->grid_map_->indexToPos(curr_idx, new_target);
+                 ROS_WARN("Relocated target to [%f, %f, %f]", new_target(0), new_target(1), new_target(2));
+                 target = new_target;
+                 return true;
+             }
+        }
+
+        // Add neighbors
+        for (int i = 0; i < 6; ++i) {
+            Eigen::Vector3i next_idx = curr_idx + Eigen::Vector3i(dx[i], dy[i], dz[i]);
+            
+            if (isValidIdx(next_idx)) {
+                int v_idx = getVisitedIdx(next_idx);
+                if (!visited[v_idx]) {
+                    visited[v_idx] = true;
+                    q.push(next_idx);
+                }
+            }
+        }
+    }
+
+    ROS_ERROR("Target point is in obstacle and no free space found nearby!");
+    return false;
+  }
 
   // 读取预设目标点
   void EGOReplanFSM::readGivenWps()
@@ -306,13 +393,35 @@ namespace ego_planner
 
   void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
   {
+    Eigen::Vector3d next_wp_check = next_wp;
+    bool found_valid = checkAndFixTarget(next_wp_check);
+
+    if (!found_valid)
+    {
+      ROS_ERROR("Skipping waypoint %d because no nearby free space was found.", wp_id_);
+      wp_id_++;
+      if (wp_id_ < waypoint_num_)
+      {
+        planNextWaypoint(wps_[wp_id_]);
+      }
+      else
+      {
+        ROS_WARN("No more waypoints available. Returning to WAIT_TARGET.");
+        changeFSMExecState(WAIT_TARGET, "FSM");
+      }
+      return;
+    } else {
+      // Visualize the relocated target point (Color: Yellow)
+      visualization_->displayGoalPoint(next_wp_check, Eigen::Vector4d(1.0, 1.0, 0, 1), 0.3, 100 + wp_id_);
+    }
+
     bool success = false;
     // planGlobalTraj(起始位置\速度\加速度,终点位置\速度\加速度)
-    success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+    success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), next_wp_check, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     if (success)
     {
-      end_pt_ = next_wp;
+      end_pt_ = next_wp_check;
 
       constexpr double step_size_t = 0.1;
       // planner_manager_->global_data_.global_duration_是整段轨迹的预估时间

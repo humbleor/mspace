@@ -40,7 +40,7 @@
       <node pkg="lidar_map_generator" name="map_pub2" type="map_pub" output="screen"
               args="$(arg map_name)">
               <param name="downsample_res" value="$(arg downsample_resolution)"/>
-              <param name="map_offset_x" value="10.0"/>   
+              <param name="map_offset_x" value="8.0"/>   
               <param name="map_offset_y" value="-10.0"/>   
               <param name="map_offset_z" value="-3.0"/>   
       </node>  
