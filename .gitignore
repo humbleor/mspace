@@ -1,6 +1,8 @@
 build/
 devel/
 Modules/ego_planner_swarm/src/uav_simulator/lidar_map_generator/resource
+Scripts/flight_data/
+GEMINI.md
 
 __pycache__
 _ext

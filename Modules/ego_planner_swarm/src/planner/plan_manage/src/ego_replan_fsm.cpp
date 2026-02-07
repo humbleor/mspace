@@ -308,10 +308,9 @@ namespace ego_planner
     planner_manager_->grid_map_->posToIndex(target, center_idx);
 
     double res = planner_manager_->grid_map_->getResolution();
-    cout<<"grid map:"<<res<<endl;
     int search_radius_idx = 20; // Default for res=0.1
     if (res > 0.0) {
-        search_radius_idx = ceil(4.0 / res);
+        search_radius_idx = ceil(2.0 / res);
     }
     
     std::queue<Eigen::Vector3i> q;
@@ -386,9 +385,53 @@ namespace ego_planner
   // 读取预设目标点
   void EGOReplanFSM::readGivenWps()
   {
-    // 执行第一个路径点
-    wp_id_ = 0;
-    planNextWaypoint(wps_[wp_id_]);
+    if (waypoint_num_ > 1 && (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET))
+    {
+      bool success = planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), wps_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+
+      if (success)
+      {
+        end_pt_ = wps_.back();
+
+        constexpr double step_size_t = 0.1;
+        int i_end = floor(planner_manager_->global_data_.global_duration_ / step_size_t);
+        vector<Eigen::Vector3d> gloabl_traj(i_end);
+        for (int i = 0; i < i_end; i++)
+        {
+          gloabl_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
+        }
+
+        end_vel_.setZero();
+        have_target_ = true;
+        have_new_target_ = true;
+
+        wp_id_ = 0;
+
+        if (exec_state_ == WAIT_TARGET)
+          changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
+        else
+        {
+          while (exec_state_ != EXEC_TRAJ)
+          {
+            ros::spinOnce();
+            ros::Duration(0.001).sleep();
+          }
+          changeFSMExecState(REPLAN_TRAJ, "TRIG");
+        }
+
+        visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      }
+      else
+      {
+        ROS_ERROR("Unable to generate global trajectory through all waypoints!");
+      }
+    }
+    else
+    {
+      // 执行第一个路径点
+      wp_id_ = 0;
+      planNextWaypoint(wps_[wp_id_]);
+    }
   }
 
   void EGOReplanFSM::planNextWaypoint(const Eigen::Vector3d next_wp)
@@ -828,19 +871,53 @@ namespace ego_planner
       double t_cur = (time_now - info->start_time_).toSec();
       t_cur = min(info->duration_, t_cur);
 
-      // 当前位置从轨迹中读取,可改为从odom中读取
+      // 当前位置从轨迹中读取
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
 
-      /* && (end_pt_ - pos).norm() < 0.5 */
+      /* 1. 动态重定位逻辑：当目标点进入雷达感知范围时进行校验 (雷达实时建图重定位) */
+      static int last_checked_wp_id = -1;
+      if (wp_id_ < waypoint_num_ && wp_id_ != last_checked_wp_id)
+      {
+        double dist_to_wp = (wps_[wp_id_] - pos).norm();
+        if (dist_to_wp < planning_horizen_)
+        {
+          Eigen::Vector3d old_wp = wps_[wp_id_];
+          if (checkAndFixTarget(wps_[wp_id_]) && (wps_[wp_id_] - old_wp).norm() > 1e-2)
+          {
+            ROS_INFO("Waypoint %d enters radar range and relocated, updating global trajectory...", wp_id_);
+            visualization_->displayGoalPoint(wps_[wp_id_], Eigen::Vector4d(1.0, 1.0, 0, 1), 0.3, 100 + wp_id_);
+
+            std::vector<Eigen::Vector3d> remaining_wps;
+            for (int i = wp_id_; i < waypoint_num_; i++) remaining_wps.push_back(wps_[i]);
+            
+            if (planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), remaining_wps, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()))
+            {
+              end_pt_ = wps_.back();
+              constexpr double step_size_t = 0.1;
+              int i_end = floor(planner_manager_->global_data_.global_duration_ / step_size_t);
+              vector<Eigen::Vector3d> global_traj(i_end);
+              for (int i = 0; i < i_end; i++) global_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
+              visualization_->displayGlobalPathList(global_traj, 0.1, 0);
+              
+              changeFSMExecState(REPLAN_TRAJ, "WP_RELOC");
+              last_checked_wp_id = wp_id_; 
+              goto force_return;
+            }
+          }
+          last_checked_wp_id = wp_id_; 
+        }
+      }
+
+      /* 2. 检查是否到达中间路径点 */
       if ((target_type_ == TARGET_TYPE::PRESET_TARGET || 
           target_type_ == TARGET_TYPE::GENERATE_TARGET) &&
           (wp_id_ < waypoint_num_ - 1) &&
-          (end_pt_ - pos).norm() < no_replan_thresh_)
+          (wps_[wp_id_] - pos).norm() < no_replan_thresh_)
       {
         wp_id_++;
-        planNextWaypoint(wps_[wp_id_]);
+        // 此处不再重新调用 planNextWaypoint，以保持全局轨迹的连续平滑，不减速。
       }
-      else if ((local_target_pt_ - end_pt_).norm() < 1e-3) // end_pt_是目标点，
+      else if ((local_target_pt_ - end_pt_).norm() < 1e-3) // end_pt_是最终目标点，
       {
         if (t_cur > info->duration_ - 1e-2)
         {
