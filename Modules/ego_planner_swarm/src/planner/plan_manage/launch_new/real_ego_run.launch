@@ -25,12 +25,12 @@
     <arg name="box_min_x" value="0.0"/>
     <arg name="box_min_y" value="0.0"/>
     <arg name="box_min_z" value="2.0"/>
-    <arg name="box_max_x" value="10.0"/>
-    <arg name="box_max_y" value="10.0"/>
+    <arg name="box_max_x" value="20.0"/>
+    <arg name="box_max_y" value="16.0"/>
     <arg name="box_max_z" value="3.0"/>
 
-    <arg name="step_X" value="3.0"/>
-    <arg name="step_Y" value="3.0"/>
+    <arg name="step_X" value="5.0"/>
+    <arg name="step_Y" value="5.0"/>
     <arg name="step_Z" value="2.0"/>
 
     <!-- waypointDistribution flag 0:水平遍历fly, 1表示垂直fly, 2表示螺旋式fly,针对单颗树木-->

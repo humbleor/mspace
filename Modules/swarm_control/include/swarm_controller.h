@@ -151,10 +151,10 @@ void init(ros::NodeHandle &nh)
     // 是否打印消息
     nh.param<bool>("flag_printf", flag_printf, true);
     // 地理围栏
-    nh.param<float>("geo_fence/x_min", geo_fence_x[0], -300.0);
-    nh.param<float>("geo_fence/x_max", geo_fence_x[1], 300.0);
-    nh.param<float>("geo_fence/y_min", geo_fence_y[0], -300.0);
-    nh.param<float>("geo_fence/y_max", geo_fence_y[1], 300.0);
+    nh.param<float>("geo_fence/x_min", geo_fence_x[0], -500.0);
+    nh.param<float>("geo_fence/x_max", geo_fence_x[1], 500.0);
+    nh.param<float>("geo_fence/y_min", geo_fence_y[0], -500.0);
+    nh.param<float>("geo_fence/y_max", geo_fence_y[1], 500.0);
     nh.param<float>("geo_fence/z_min", geo_fence_z[0], -1.0);
     nh.param<float>("geo_fence/z_max", geo_fence_z[1], 50.0);
     // 如果是使用的ekf2_gps则需要设置，如果使用的是ekf2_vision则不需要
