@@ -96,4 +96,10 @@
         <param name="tf45" value="true"/>
   </node>
 
+  <!-- <include file="$(find rosmsg_tcp_bridge)/launch/bridge.launch">
+    <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="next_drone_ip" value="$(arg next_drone_ip)"/>
+    <arg name="broadcast_ip" value="$(arg broadcast_ip)"/>
+  </include> -->
+
 </launch>

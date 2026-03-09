@@ -133,7 +133,7 @@
         <param name="robot_scale" value="1.0"/>
         <param name="tf45" value="true"/>
         <param name="quadrotor_name" value="uav$(arg uav_id)"/>
-        <param name="uav_id" value="uav_id"/>
+        <param name="drone_id" value="$(arg uav_id)"/>
     </node>
 
     <group if="$(arg use_gpu)">

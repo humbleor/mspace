@@ -176,49 +176,71 @@ namespace ego_planner
     double minZ, double maxZ, double stepX, double stepY, double stepZ)
   {
     int idx = 0;
-    for (double z = minZ; z < maxZ; z += 2 * stepZ)
-    {
-      for (double y = minY; y < maxY; y += 2 * stepY)
-      {
-        for (double x = minX + stepX/2; x < maxX; x += stepX)
-        {
-          waypoints_[idx][0] = x;
-          waypoints_[idx][1] = y;
-          waypoints_[idx][2] = z;
-          idx++;
-        }
-        y += stepY;
-        for (double x = maxX - stepX/2; x > minX; x -= stepX)
-        {
-          waypoints_[idx][0] = x;
-          waypoints_[idx][1] = y;
-          waypoints_[idx][2] = z;
-          idx++;
-        }
-        y -= stepY;
-      }
-      z += stepZ;
-      if (z > maxZ) // 如果当前Z值超过定义的Z最大值，则退出
-        break;
+    double eps = 1e-4;
 
-      for (double y = maxY; y > minY; y -= 2 * stepY)
+    for (double z = minZ; z <= maxZ + eps; z += (maxZ > minZ ? 2 * stepZ : 1e6))
+    {
+      for (double y = minY; y <= maxY + eps; y += (maxY > minY ? 2 * stepY : 1e6))
       {
-        for (double x = minX + stepX/2; x < maxX; x += stepX)
+        for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
         {
           waypoints_[idx][0] = x;
           waypoints_[idx][1] = y;
           waypoints_[idx][2] = z;
           idx++;
+          if (maxX <= minX + eps) break;
         }
-        y -= stepY;
-        for (double x = maxX; x > minX; x -= stepX)
+
+        if (maxY > minY + eps)
+        {
+          double next_y = y + stepY;
+          if (next_y <= maxY + eps)
+          {
+            for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
+            {
+              waypoints_[idx][0] = x;
+              waypoints_[idx][1] = next_y;
+              waypoints_[idx][2] = z;
+              idx++;
+              if (maxX <= minX + eps) break;
+            }
+          }
+        }
+        if (maxY <= minY + eps) break;
+      }
+
+      if (maxZ <= minZ + eps) break;
+
+      z += stepZ;
+      if (z > maxZ + eps) break;
+
+      for (double y = maxY; y >= minY - eps; y -= (maxY > minY ? 2 * stepY : 1e6))
+      {
+        for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
         {
           waypoints_[idx][0] = x;
           waypoints_[idx][1] = y;
           waypoints_[idx][2] = z;
           idx++;
+          if (maxX <= minX + eps) break;
         }
-        y += stepY;
+
+        if (maxY > minY + eps)
+        {
+          double next_y = y - stepY;
+          if (next_y >= minY - eps)
+          {
+            for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
+            {
+              waypoints_[idx][0] = x;
+              waypoints_[idx][1] = next_y;
+              waypoints_[idx][2] = z;
+              idx++;
+              if (maxX <= minX + eps) break;
+            }
+          }
+        }
+        if (maxY <= minY + eps) break;
       }
       z -= stepZ;
     }

@@ -10,5 +10,6 @@ gnome-terminal \
 --tab -e 'bash -c "sleep 15; roslaunch fast_lio mapping_mid360.launch uav_id:=2; exec bash"' \
 --tab -e 'bash -c "sleep 10; roslaunch prometheus_swarm_control ego_swarm_control.launch swarm_num:=2 uav_id:=2; exec bash"' \
 --tab -e 'bash -c "sleep 10; roslaunch ego_planner real_ego_run.launch uav_id:=2; exec bash"' \
+--tab -e 'bash -c "sleep 10; roslaunch rosmsg_tcp_bridge bridge.launch uav_id:=2 next_drone_ip:=192.168.1.50 broadcast_ip:=192.168.1.255; exec bash"' \
 # --tab -e 'bash -c "sleep 15; roslaunch prometheus_swarm_control ego_station.launch; exec bash"' \
 --tab -e 'bash -c "sleep 5; roslaunch realsense2_camera rs_camera.launch; exec bash"'

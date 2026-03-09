@@ -57,7 +57,7 @@ namespace ego_planner
     /* parameters */
     int target_type_; // 1 mannual select, 2 hard code
     double no_replan_thresh_, replan_thresh_;
-    double waypoints_[100][3];
+    double waypoints_[300][3];
     int waypoint_num_, wp_id_;
     int numSpiralSegments_, waypointDistriFlag_;
     double box_min_x, box_min_y, box_min_z, box_max_x, box_max_y, box_max_z;

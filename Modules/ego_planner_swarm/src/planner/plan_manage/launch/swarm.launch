@@ -6,7 +6,7 @@
     <arg name="odom_topic" value="visual_slam/odom" />
     <include file="$(find ego_planner)/launch/rviz.launch"/>
 
-    <arg name="map_name" value="/home/mspace/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/>
+    <arg name="map_name" value="$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/>
     <!-- <arg name="map_name" value="$(find lidar_map_generator)/resource/small_forest01cutoff.pcd"/> -->
     <arg name="downsample_resolution" value="0.1"/>
       <node pkg="lidar_map_generator" name="map_pub2" type="map_pub" output="screen"

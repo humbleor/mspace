@@ -74,16 +74,16 @@ void VisualizeDroneID(const std_msgs::Header &header, const Eigen::Vector3d &pos
     vis_drone_id.action = visualization_msgs::Marker::ADD;
     vis_drone_id.type = visualization_msgs::Marker::TEXT_VIEW_FACING;
     vis_drone_id.id = drone_id;
-    vis_drone_id.color.a = 1.0; // Don't forget to set the alpha!
-    vis_drone_id.color.r = 1.0;
-    vis_drone_id.color.g = 1.0;
-    vis_drone_id.color.b = 1.0;
-    vis_drone_id.scale.x = 0.4;
-    vis_drone_id.scale.y = 0.4;
-    vis_drone_id.scale.z = 0.4;
+    vis_drone_id.color.a = 0.6; // Don't forget to set the alpha!
+    vis_drone_id.color.r = 0.0;
+    vis_drone_id.color.g = 0.0;
+    vis_drone_id.color.b = 0.0;
+    vis_drone_id.scale.x = 0.3;
+    vis_drone_id.scale.y = 0.3;
+    vis_drone_id.scale.z = 0.3;
 
     vis_drone_id.pose.position.x = posi(0);
-    vis_drone_id.pose.position.y = posi(1) + 0.5;
+    vis_drone_id.pose.position.y = posi(1) - 0.6;
     vis_drone_id.pose.position.z = posi(2);
     vis_drone_id.pose.orientation.x = 0.0;
     vis_drone_id.pose.orientation.y = 0.0;
@@ -532,7 +532,7 @@ int main(int argc, char **argv) {
     n.param("covariance_position", cov_pos, false);
     n.param("covariance_velocity", cov_vel, false);
     n.param("covariance_color", cov_color, false);
-    n.param("drone_id", drone_id, 0);
+    n.param("drone_id", drone_id, 1);
     n.param("quadrotor_name", quad_name, std::string("quadrotor"));
     n.param("pose_topic_sub", sub_quadpose_topic, string(""));
     n.param("relative_pose_topic", relative_pose_topic, string(""));
