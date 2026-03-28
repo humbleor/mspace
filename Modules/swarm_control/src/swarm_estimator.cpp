@@ -161,9 +161,9 @@ void timercb_vision(const ros::TimerEvent &e)
     //mocap
     if (input_source == 0)
     {
-        vision.pose.position.x = pos_drone_mocap[0];
-        vision.pose.position.y = pos_drone_mocap[1];
-        vision.pose.position.z = pos_drone_mocap[2];
+        vision.pose.position.x = pos_drone_mocap[0] + pos_offset[0];
+        vision.pose.position.y = pos_drone_mocap[1] + pos_offset[1];
+        vision.pose.position.z = pos_drone_mocap[2] + pos_offset[2];
 
         vision.pose.orientation.x = q_mocap.x();
         vision.pose.orientation.y = q_mocap.y();
@@ -179,9 +179,9 @@ void timercb_vision(const ros::TimerEvent &e)
     //faster-lio
     else if (input_source == 1)
     {
-        vision.pose.position.x = pos_drone_lidar[0];
-        vision.pose.position.y = pos_drone_lidar[1];
-        vision.pose.position.z = pos_drone_lidar[2];
+        vision.pose.position.x = pos_drone_lidar[0] + pos_offset[0];
+        vision.pose.position.y = pos_drone_lidar[1] + pos_offset[1];
+        vision.pose.position.z = pos_drone_lidar[2] + pos_offset[2];
 
         vision.pose.orientation.x = q_lidar.x();
         vision.pose.orientation.y = q_lidar.y();
@@ -191,9 +191,9 @@ void timercb_vision(const ros::TimerEvent &e)
     // gazebo
     else if (input_source == 2)
     {
-        vision.pose.position.x = pos_drone_gazebo[0];
-        vision.pose.position.y = pos_drone_gazebo[1];
-        vision.pose.position.z = pos_drone_gazebo[2];
+        vision.pose.position.x = pos_drone_gazebo[0] + pos_offset[0];
+        vision.pose.position.y = pos_drone_gazebo[1] + pos_offset[1];
+        vision.pose.position.z = pos_drone_gazebo[2] + pos_offset[2];
 
         vision.pose.orientation.x = q_gazebo.x();
         vision.pose.orientation.y = q_gazebo.y();
@@ -203,9 +203,9 @@ void timercb_vision(const ros::TimerEvent &e)
     // t265
     else if (input_source == 3)
     {
-        vision.pose.position.x = pos_drone_t265[0];
-        vision.pose.position.y = pos_drone_t265[1];
-        vision.pose.position.z = pos_drone_t265[2];
+        vision.pose.position.x = pos_drone_t265[0] + pos_offset[0];
+        vision.pose.position.y = pos_drone_t265[1] + pos_offset[1];
+        vision.pose.position.z = pos_drone_t265[2] + pos_offset[2];
 
         vision.pose.orientation.x = q_t265.x();
         vision.pose.orientation.y = q_t265.y();
@@ -215,9 +215,9 @@ void timercb_vision(const ros::TimerEvent &e)
     //fast-lio2
     else if (input_source == 4)
     {
-        vision.pose.position.x = pos_drone_lidar_fastlio2[0];
-        vision.pose.position.y = pos_drone_lidar_fastlio2[1];
-        vision.pose.position.z = pos_drone_lidar_fastlio2[2];
+        vision.pose.position.x = pos_drone_lidar_fastlio2[0] + pos_offset[0];
+        vision.pose.position.y = pos_drone_lidar_fastlio2[1] + pos_offset[1];
+        vision.pose.position.z = pos_drone_lidar_fastlio2[2] + pos_offset[2];
 
         vision.pose.orientation.x = q_lidar_fastlio2.x();
         vision.pose.orientation.y = q_lidar_fastlio2.y();

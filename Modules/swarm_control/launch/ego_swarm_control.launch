@@ -6,7 +6,7 @@
 	<!-- 无人机初始位置 -->
 	<arg name="uav_init_x" default="0.0"/>
     <arg name="uav_init_y" default="0.0"/>
-	<arg name="uav_init_z" default="0.15"/>
+	<arg name="uav_init_z" default="0.0"/>
 	<arg name="uav_init_yaw" default="0.0"/>
 	<!-- swarm_estimator 参数 激光惯性里程计(fast-lio2)-->
 	<arg name="input_source" default="4"/>
@@ -15,6 +15,9 @@
 	<node pkg="prometheus_swarm_control" type="swarm_estimator" name="swarm_estimator_uav_$(arg uav_id)" output="screen">
 		<param name="uav_id" value="$(arg uav_id)"/>
 		<param name="input_source" value="$(arg input_source)" />
+		<param name="offset_x" value="$(arg uav_init_x)"/>
+		<param name="offset_y" value="$(arg uav_init_y)"/>
+		<param name="offset_z" value="$(arg uav_init_z)"/>
 		<remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/>
 	</node>
 
