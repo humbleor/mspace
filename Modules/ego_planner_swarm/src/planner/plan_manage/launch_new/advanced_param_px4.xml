@@ -42,9 +42,10 @@
   <arg name="numSpiralSegments"/>
   <arg name="stepZ_rotate"/>
   <arg name="waypointDistriFlag"/>
+  <arg name="grid_direction" default="0"/>
 
   <!-- main node -->
-  <node pkg="ego_planner" name="uav_$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen">
+  <node pkg="ego_planner" name="uav_$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen" required="true">
     <!-- /uav1/mavros/local_position/odom -->
     <remap from="~odom_world" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
     <remap from="~planning/bspline" to = "/uav$(arg uav_id)/planning/bspline"/>
@@ -77,7 +78,8 @@
     <param name="fsm/radius_R" value="$(arg radius_R)" type="double"/>
     <param name="fsm/numSpiralSegments" value="$(arg numSpiralSegments)" type="int"/>
     <param name="fsm/stepZ_rotate" value="$(arg stepZ_rotate)" type="double"/>
-    <param name="fsm/waypointDistriFlag" value="$(arg waypointDistriFlag)" type="int"/> 
+    <param name="fsm/waypointDistriFlag" value="$(arg waypointDistriFlag)" type="int"/>
+    <param name="fsm/grid_direction" value="$(arg grid_direction)" type="int"/> 
 
     <param name="grid_map/resolution"      value="0.10" /> 
     <param name="grid_map/map_size_x"   value="$(arg map_size_x_)" /> 

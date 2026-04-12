@@ -39,6 +39,7 @@ namespace ego_planner
     nh.param("fsm/radius_R", radius_R_, -1.0);
     nh.param("fsm/numSpiralSegments", numSpiralSegments_, 4);
     nh.param("fsm/waypointDistriFlag", waypointDistriFlag_, 1);
+    nh.param("fsm/grid_direction", grid_direction_, 0);
     nh.param("fsm/minZ_rotate", minZ_rotate_, -1.0);
     nh.param("fsm/maxZ_rotate", maxZ_rotate_, -1.0);
     nh.param("fsm/stepZ_rotate", stepZ_rotate_, -1.0);
@@ -129,7 +130,7 @@ namespace ego_planner
       for (size_t i = 0; i < (size_t)waypoint_num_; i++)
       {
         // 发布目标点用于显示 "/uav_x_ego_planner_node/goal_point" - [目标点,颜色,大小,id]
-        visualization_->displayGoalPoint(wps_[i], Eigen::Vector4d(1.0, 0, 0, 1), 0.3, i);
+        visualization_->displayGoalPoint(wps_[i], Eigen::Vector4d(1.0, 0, 0, 1), 0.2, i);
         ros::Duration(0.001).sleep();
       }
 
@@ -150,11 +151,22 @@ namespace ego_planner
     }
   }
 
+  Eigen::Vector4d EGOReplanFSM::getColorByDroneId()
+  {
+    int id = planner_manager_->pp_.drone_id;
+    // random color for drones global path
+    return Eigen::Vector4d(
+      0.3 + 0.7 * ((id * 0.37) - (int)(id * 0.37)),
+      0.3 + 0.7 * ((id * 0.73) - (int)(id * 0.73)),
+      0.3 + 0.7 * ((id * 0.51) - (int)(id * 0.51)),
+      1.0);
+  }
+
   void EGOReplanFSM::generateWps()
   {
     if (waypointDistriFlag_ == 0)
     {
-      waypoint_num_ = generateGridWaypoints(box_min_x, box_max_x, box_min_y, box_max_y, 
+      waypoint_num_ = generateGridWaypoints(box_min_x, box_max_x, box_min_y, box_max_y,
                       box_min_z, box_max_z, stepX_, stepY_, stepZ_);
     }
     else if (waypointDistriFlag_ == 1)
@@ -169,80 +181,154 @@ namespace ego_planner
     } else {
       cout << "Wrong waypointDistriFlag_ value! waypointDistriFlag_=" << waypointDistriFlag_ << endl;
     }
-    sleep(45);
+    sleep(10);
   }
 
-  int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY, 
+  int EGOReplanFSM::generateGridWaypoints(double minX, double maxX, double minY, double maxY,
     double minZ, double maxZ, double stepX, double stepY, double stepZ)
   {
     int idx = 0;
     double eps = 1e-4;
 
-    for (double z = minZ; z <= maxZ + eps; z += (maxZ > minZ ? 2 * stepZ : 1e6))
+    if (grid_direction_ == 0)
     {
-      for (double y = minY; y <= maxY + eps; y += (maxY > minY ? 2 * stepY : 1e6))
+      // Y轴推进 + X轴折返
+      for (double z = minZ; z <= maxZ + eps; z += (maxZ > minZ ? 2 * stepZ : 1e6))
       {
-        for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
+        for (double y = minY; y <= maxY + eps; y += (maxY > minY ? 2 * stepY : 1e6))
         {
-          waypoints_[idx][0] = x;
-          waypoints_[idx][1] = y;
-          waypoints_[idx][2] = z;
-          idx++;
+          for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
+          {
+            waypoints_[idx][0] = x;
+            waypoints_[idx][1] = y;
+            waypoints_[idx][2] = z;
+            idx++;
+            if (maxX <= minX + eps) break;
+          }
+
+          if (maxY > minY + eps)
+          {
+            double next_y = y + stepY;
+            if (next_y <= maxY + eps)
+            {
+              for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
+              {
+                waypoints_[idx][0] = x;
+                waypoints_[idx][1] = next_y;
+                waypoints_[idx][2] = z;
+                idx++;
+                if (maxX <= minX + eps) break;
+              }
+            }
+          }
+          if (maxY <= minY + eps) break;
+        }
+
+        if (maxZ <= minZ + eps) break;
+
+        z += stepZ;
+        if (z > maxZ + eps) break;
+
+        for (double y = maxY; y >= minY - eps; y -= (maxY > minY ? 2 * stepY : 1e6))
+        {
+          for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
+          {
+            waypoints_[idx][0] = x;
+            waypoints_[idx][1] = y;
+            waypoints_[idx][2] = z;
+            idx++;
+            if (maxX <= minX + eps) break;
+          }
+
+          if (maxY > minY + eps)
+          {
+            double next_y = y - stepY;
+            if (next_y >= minY - eps)
+            {
+              for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
+              {
+                waypoints_[idx][0] = x;
+                waypoints_[idx][1] = next_y;
+                waypoints_[idx][2] = z;
+                idx++;
+                if (maxX <= minX + eps) break;
+              }
+            }
+          }
+          if (maxY <= minY + eps) break;
+        }
+        z -= stepZ;
+      }
+    }
+    else
+    {
+      // X轴推进 + Y轴折返
+      for (double z = minZ; z <= maxZ + eps; z += (maxZ > minZ ? 2 * stepZ : 1e6))
+      {
+        for (double x = minX; x <= maxX + eps; x += (maxX > minX ? 2 * stepX : 1e6))
+        {
+          for (double y = minY; y <= maxY + eps; y += (maxY > minY ? stepY : 1e6))
+          {
+            waypoints_[idx][0] = x;
+            waypoints_[idx][1] = y;
+            waypoints_[idx][2] = z;
+            idx++;
+            if (maxY <= minY + eps) break;
+          }
+
+          if (maxX > minX + eps)
+          {
+            double next_x = x + stepX;
+            if (next_x <= maxX + eps)
+            {
+              for (double y = maxY; y >= minY - eps; y -= (maxY > minY ? stepY : 1e6))
+              {
+                waypoints_[idx][0] = next_x;
+                waypoints_[idx][1] = y;
+                waypoints_[idx][2] = z;
+                idx++;
+                if (maxY <= minY + eps) break;
+              }
+            }
+          }
           if (maxX <= minX + eps) break;
         }
 
-        if (maxY > minY + eps)
+        if (maxZ <= minZ + eps) break;
+
+        z += stepZ;
+        if (z > maxZ + eps) break;
+
+        for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? 2 * stepX : 1e6))
         {
-          double next_y = y + stepY;
-          if (next_y <= maxY + eps)
+          for (double y = minY; y <= maxY + eps; y += (maxY > minY ? stepY : 1e6))
           {
-            for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
+            waypoints_[idx][0] = x;
+            waypoints_[idx][1] = y;
+            waypoints_[idx][2] = z;
+            idx++;
+            if (maxY <= minY + eps) break;
+          }
+
+          if (maxX > minX + eps)
+          {
+            double next_x = x - stepX;
+            if (next_x >= minX - eps)
             {
-              waypoints_[idx][0] = x;
-              waypoints_[idx][1] = next_y;
-              waypoints_[idx][2] = z;
-              idx++;
-              if (maxX <= minX + eps) break;
+              for (double y = maxY; y >= minY - eps; y -= (maxY > minY ? stepY : 1e6))
+              {
+                waypoints_[idx][0] = next_x;
+                waypoints_[idx][1] = y;
+                waypoints_[idx][2] = z;
+                idx++;
+                if (maxY <= minY + eps) break;
+              }
             }
           }
-        }
-        if (maxY <= minY + eps) break;
-      }
-
-      if (maxZ <= minZ + eps) break;
-
-      z += stepZ;
-      if (z > maxZ + eps) break;
-
-      for (double y = maxY; y >= minY - eps; y -= (maxY > minY ? 2 * stepY : 1e6))
-      {
-        for (double x = minX; x <= maxX + eps; x += (maxX > minX ? stepX : 1e6))
-        {
-          waypoints_[idx][0] = x;
-          waypoints_[idx][1] = y;
-          waypoints_[idx][2] = z;
-          idx++;
           if (maxX <= minX + eps) break;
         }
-
-        if (maxY > minY + eps)
-        {
-          double next_y = y - stepY;
-          if (next_y >= minY - eps)
-          {
-            for (double x = maxX; x >= minX - eps; x -= (maxX > minX ? stepX : 1e6))
-            {
-              waypoints_[idx][0] = x;
-              waypoints_[idx][1] = next_y;
-              waypoints_[idx][2] = z;
-              idx++;
-              if (maxX <= minX + eps) break;
-            }
-          }
-        }
-        if (maxY <= minY + eps) break;
+        z -= stepZ;
       }
-      z -= stepZ;
     }
     return idx;
   }
@@ -441,7 +527,7 @@ namespace ego_planner
           changeFSMExecState(REPLAN_TRAJ, "TRIG");
         }
 
-        visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+        visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0, getColorByDroneId());
       }
       else
       {
@@ -516,7 +602,7 @@ namespace ego_planner
       }
 
       // 发布GlobalPath用于显示 "/uav_x_ego_planner_node/global_list" - [GlobalPath,大小,id]
-      visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0);
+      visualization_->displayGlobalPathList(gloabl_traj, 0.1, 0, getColorByDroneId());
     }
     else
     {
@@ -919,7 +1005,7 @@ namespace ego_planner
               int i_end = floor(planner_manager_->global_data_.global_duration_ / step_size_t);
               vector<Eigen::Vector3d> global_traj(i_end);
               for (int i = 0; i < i_end; i++) global_traj[i] = planner_manager_->global_data_.global_traj_.evaluate(i * step_size_t);
-              visualization_->displayGlobalPathList(global_traj, 0.1, 0);
+              visualization_->displayGlobalPathList(global_traj, 0.1, 0, getColorByDroneId());
               
               changeFSMExecState(REPLAN_TRAJ, "WP_RELOC");
               last_checked_wp_id = wp_id_; 
@@ -1103,6 +1189,14 @@ namespace ego_planner
         }
 
         double t_X = t_cur_global - planner_manager_->swarm_trajs_buf_.at(id).start_time_.toSec();
+        double neighbor_dur = planner_manager_->swarm_trajs_buf_.at(id).duration_;
+        // Skip neighbor trajectories that have already expired to avoid
+        // false collision detection when neighbor has finished its trajectory.
+        if (t_X < 0.0 || t_X > neighbor_dur)
+        {
+          continue;
+        }
+
         Eigen::Vector3d swarm_pridicted = planner_manager_->swarm_trajs_buf_.at(id).position_traj_.evaluateDeBoorT(t_X);
         double dist = (p_cur - swarm_pridicted).norm();
 

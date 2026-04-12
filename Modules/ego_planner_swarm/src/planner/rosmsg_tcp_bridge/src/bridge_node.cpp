@@ -667,9 +667,10 @@ void server_fun()
       return;
     }
 
-    if (valread == deserializeMultiBsplines(bsplines_msg_))
+    if ( valread == deserializeMultiBsplines(bsplines_msg_) )
     {
-      swarm_trajs_pub_.publish(*bsplines_msg_);
+      if ( swarm_trajs_pub_ )
+        swarm_trajs_pub_.publish(*bsplines_msg_);
     }
     else
     {

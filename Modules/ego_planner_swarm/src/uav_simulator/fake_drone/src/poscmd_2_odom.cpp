@@ -10,7 +10,7 @@ ros::Subscriber _cmd_sub;
 ros::Publisher  _odom_pub;
 
 quadrotor_msgs::PositionCommand _cmd;
-double _init_x, _init_y, _init_z;
+double _init_x, _init_y, _init_z, _init_yaw;
 
 bool rcv_cmd = false;
 void rcvPosCmdCallBack(const quadrotor_msgs::PositionCommand cmd)
@@ -61,10 +61,10 @@ void pubOdom()
 	    odom.pose.pose.position.y = _init_y;
 	    odom.pose.pose.position.z = _init_z;
 
-	    odom.pose.pose.orientation.w = 1;
+	    odom.pose.pose.orientation.w = cos(_init_yaw / 2.0);
 	    odom.pose.pose.orientation.x = 0;
 	    odom.pose.pose.orientation.y = 0;
-	    odom.pose.pose.orientation.z = 0;
+	    odom.pose.pose.orientation.z = sin(_init_yaw / 2.0);
 
 	    odom.twist.twist.linear.x = 0.0;
 	    odom.twist.twist.linear.y = 0.0;
@@ -86,6 +86,7 @@ int main (int argc, char** argv)
     nh.param("init_x", _init_x,  0.0);
     nh.param("init_y", _init_y,  0.0);
     nh.param("init_z", _init_z,  0.0);
+    nh.param("init_yaw", _init_yaw,  0.0);
 
     _cmd_sub  = nh.subscribe( "command", 1, rcvPosCmdCallBack );
     _odom_pub = nh.advertise<nav_msgs::Odometry>("odometry", 1);                      

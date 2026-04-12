@@ -152,7 +152,7 @@ namespace ego_planner
     goal_point_pub.publish(sphere);
   }
 
-  void PlanningVisualization::displayGlobalPathList(vector<Eigen::Vector3d> init_pts, const double scale, int id)
+  void PlanningVisualization::displayGlobalPathList(vector<Eigen::Vector3d> init_pts, const double scale, int id, Eigen::Vector4d color)
   {
 
     if (global_list_pub.getNumSubscribers() == 0)
@@ -160,7 +160,6 @@ namespace ego_planner
       return;
     }
 
-    Eigen::Vector4d color(0, 0.5, 0.5, 1);
     displayMarkerList(global_list_pub, init_pts, scale, color, id);
   }
 

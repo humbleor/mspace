@@ -63,6 +63,7 @@ namespace ego_planner
     double box_min_x, box_min_y, box_min_z, box_max_x, box_max_y, box_max_z;
     double stepXY_, stepX_, stepY_, stepZ_, coordinate_X_, coordinate_Y_;
     double radius_R_, minZ_rotate_, maxZ_rotate_, stepZ_rotate_;
+    int grid_direction_; // 0 = Y轴推进+X轴折返, 1 = X轴推进+Y轴折返
     double planning_horizen_, planning_horizen_time_;
     double emergency_time_;
     bool flag_realworld_experiment_;
@@ -106,6 +107,7 @@ namespace ego_planner
     void getLocalTarget();
     bool checkAndFixTarget(Eigen::Vector3d &target);
     void generateWps();
+    Eigen::Vector4d getColorByDroneId();
     // 水平方向遍历
     int generateGridWaypoints(double minX, double maxX, double minY, double maxY, double minZ, double maxZ, double stepX, double stepY,double stepZ);
     // 垂直方向遍历

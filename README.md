@@ -39,6 +39,7 @@ cd mspace
 roslaunch ego_planner 1uav_mid360_sim.launch    # Single UAV (Mid360)
 roslaunch ego_planner 1uav_os128_sim.launch     # Single UAV (OS2-128)
 roslaunch ego_planner 4uav_mid360_sim.launch    # Swarm (4 UAVs Mid360)
+roslaunch drone_detect_lidar 2uav_lidar_detect_sim.launch   # Dual UAV LiDAR detect
 ```
 
 ---

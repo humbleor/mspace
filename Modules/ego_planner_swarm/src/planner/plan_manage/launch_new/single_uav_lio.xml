@@ -5,6 +5,7 @@
     <arg name="init_x"/>
     <arg name="init_y"/>
     <arg name="init_z"/>
+    <arg name="init_yaw" default="0.0"/>
 
     <!-- Map Parameters -->
     <arg name="map_size_x"/>
@@ -39,6 +40,7 @@
     <arg name="step_Y" default="0"/>
     <arg name="step_Z" default="0"/>
     <arg name="waypointDistriFlag" default="0"/>
+    <arg name="grid_direction" default="0"/>
     <arg name="coordinate_X" default="0"/>
     <arg name="coordinate_Y" default="0"/>
     <arg name="minZ_rotate" default="0"/>
@@ -78,6 +80,7 @@
         <arg name="step_Y" value="$(arg step_Y)"/>
         <arg name="step_Z" value="$(arg step_Z)"/>
         <arg name="waypointDistriFlag" value="$(arg waypointDistriFlag)"/>
+        <arg name="grid_direction" value="$(arg grid_direction)"/>
 
         <arg name="coordinate_X" value="$(arg coordinate_X)"/> 
         <arg name="coordinate_Y" value="$(arg coordinate_Y)"/>
@@ -106,10 +109,11 @@
     <!-- ========================================================== -->
     <!-- 2. Trajectory Server -->
     <!-- ========================================================== -->
-    <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen">
+    <node pkg="ego_planner" name="uav_$(arg uav_id)_traj_server" type="traj_server" output="screen" required="true">
         <remap from="position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
         <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
         <param name="traj_server/time_forward" value="1.0" type="double"/>
+        <param name="traj_server/init_yaw" value="$(arg init_yaw)" type="double"/>
     </node>
 
     <!-- ========================================================== -->
@@ -119,11 +123,12 @@
         <param name="init_x" value="$(arg init_x)"/>
         <param name="init_y" value="$(arg init_y)"/>
         <param name="init_z" value="$(arg init_z)"/>
+        <param name="init_yaw" value="$(arg init_yaw)"/>
         <remap from="~command" to="/uav$(arg uav_id)/planning/pos_cmd"/>
         <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
     </node>
 
-    <node pkg="odom_visualization" name="uav_$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen">
+    <node pkg="odom_visualization" name="uav_$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen" required="true">
         <remap from="~odom" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
         <param name="color/a" value="1.0"/>    
         <param name="color/r" value="0.0"/>        
@@ -139,7 +144,7 @@
     <group if="$(arg use_gpu)">
 
         <group if="$(eval lidar_type == 'avia')">
-            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen"
                 args="$(arg map_name)">
             <remap from="~global_map" to="/map_generator/global_cloud"/>
             <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
@@ -182,7 +187,7 @@
         </group>
 
         <group if="$(eval lidar_type == 'mid360')">
-            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen"
                 args="$(arg map_name)">
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
@@ -225,7 +230,7 @@
         </group>
 
         <group if="$(eval lidar_type == 'os128')">
-            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen" 
+            <node pkg="local_sensing_node" type="opengl_render_node" name="uav_$(arg uav_id)_pcl_render_node" output="screen"
                 args="$(arg map_name)">
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
@@ -273,7 +278,7 @@
     <group unless="$(arg use_gpu)">
         <!-- Livox Avia launch-prefix="gdb -ex run -args" -->
         <group if="$(eval lidar_type == 'avia')">
-            <node pkg="local_sensing_node" type="pointcloud_render_node" 
+            <node pkg="local_sensing_node" type="pointcloud_render_node"
                 name="uav_$(arg uav_id)_pcl_render_node" output="screen">
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
@@ -320,7 +325,7 @@
 launch-prefix="gdb --ex run -args"
         <group if="$(eval lidar_type == 'mid360')">
             <node pkg="local_sensing_node" type="pointcloud_render_node"
-                name="uav_$(arg uav_id)_pcl_render_node" output="screen" > <!--  -->
+                name="uav_$(arg uav_id)_pcl_render_node" output="screen"> <!--  -->
                 <remap from="~global_map" to="/map_generator/global_cloud"/>
                 <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
                 <remap from="~cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>
