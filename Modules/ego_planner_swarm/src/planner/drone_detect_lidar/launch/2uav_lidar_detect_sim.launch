@@ -1,0 +1,217 @@
+<launch>
+  <!-- ========================================================================
+       2 UAV LiDAR Detect Simulation Launch File
+       基于 LiDAR 特征配准的多机相对定位系统仿真
+       ======================================================================== -->
+
+  <!-- GPU 加速选项 -->
+  <arg name="use_gpu_" value="false"/>
+
+  <!-- 地图尺寸 -->
+  <arg name="map_size_x" value="100.0"/>
+  <arg name="map_size_y" value="100.0"/>
+  <arg name="map_size_z" value="10.0"/>
+
+  <!-- 无人机数量和 ID (从 1 开始) -->
+  <arg name="uav_id_1" value="1"/>
+  <arg name="uav_id_2" value="2"/>
+  <arg name="uav_num" value="2"/>
+
+  <!-- 初始位置 -->
+  <arg name="init_x" value="0.0"/>
+  <arg name="init_y" value="0.0"/>
+  <arg name="init_z" value="0.1"/>
+
+  <!-- 坐标系 -->
+  <arg name="frame_id" value="world"/>
+  <arg name="global_cloud_topic" value="/map_generator/global_cloud"/>
+
+  <!-- 里程计话题 (LIO 输出) -->
+  <arg name="odom_topic" value="lidar_slam/odom"/>
+
+  <!-- 移动障碍物数量 -->
+  <arg name="obj_num" value="0"/>
+
+  <!-- 地图文件 (PCD) -->
+  <arg name="map_name" value="$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/>
+  <!-- <arg name="map_name" value="$(env HOME)/bagfiles/102_ds01.pcd"/> -->
+  <!-- <arg name="map_name" value="$(env HOME)/bagfiles/003_ds01.pcd"/> -->
+  <arg name="downsample_resolution" value="0.1"/>
+  <arg name="use_uav_extra_model" value="0"/>
+
+  <!-- LiDAR 相对定位模块参数 -->
+  <arg name="enable_lidar_detect" value="true"/>
+  <arg name="lidar_detect_freq" value="5.0"/>
+  <arg name="icp_max_iterations" value="50"/>
+  <arg name="icp_trans_epsilon" value="0.0001"/>
+  <arg name="icp_fitness_thresh" value="1.0"/>
+  <arg name="icp_corr_dist" value="1.5"/>
+  <arg name="icp_use_point_to_plane" value="true"/>
+  <arg name="icp_min_inliers" value="5"/>
+  <arg name="icp_overlap_radius" value="5.0"/>
+  <arg name="max_features" value="200"/>
+
+  <!-- ========================================================================
+       1. 地图发布
+       ======================================================================== -->
+  <group if="$(arg use_gpu_)">
+    <node pkg="lidar_map_generator" name="map_pub1" type="map_pub" output="screen"
+          args="$(arg map_name)">
+      <param name="downsample_res" value="0.1"/>
+      <param name="map_offset_x" value="10.0"/>
+      <param name="map_offset_y" value="-11.0"/>
+      <param name="map_offset_z" value="-3.0"/>
+    </node>
+  </group>
+
+  <group unless="$(arg use_gpu_)">
+    <node pkg="lidar_map_generator" name="map_pub2" type="map_pub" output="screen"
+          args="$(arg map_name)">
+      <param name="downsample_res" value="$(arg downsample_resolution)"/>
+      <param name="map_offset_x" value="10.0"/>
+      <param name="map_offset_y" value="-11.0"/>
+      <param name="map_offset_z" value="-3.0"/>
+    </node>
+  </group>
+
+  <!-- ========================================================================
+       2. UAV 1 配置
+       ======================================================================== -->
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
+    <arg name="uav_id" value="$(arg uav_id_1)"/>
+    <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="lidar_type" value="mid360"/>
+    <arg name="init_x" value="$(arg init_x)"/>
+    <arg name="init_y" value="$(arg init_y)"/>
+    <arg name="init_z" value="$(arg init_z)"/>
+    <arg name="map_size_x" value="$(arg map_size_x)"/>
+    <arg name="map_size_y" value="$(arg map_size_y)"/>
+    <arg name="map_size_z" value="$(arg map_size_z)"/>
+    <arg name="map_name" value="$(arg map_name)"/>
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num" value="$(arg obj_num)"/>
+    <arg name="use_gpu" value="$(arg use_gpu_)"/>
+    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
+    <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
+
+    <!-- UAV 1 路径生成参数 -->
+    <arg name="box_min_x" value="0.0"/>
+    <arg name="box_min_y" value="0.0"/>
+    <arg name="box_min_z" value="2.0"/>
+    <arg name="box_max_x" value="12.0"/>
+    <arg name="box_max_y" value="6.0"/>
+    <arg name="box_max_z" value="2.0"/>
+    <arg name="step_X" value="3.0"/>
+    <arg name="step_Y" value="3.0"/>
+    <arg name="step_Z" value="2.0"/>
+    <arg name="waypointDistriFlag" value="0"/>
+    <arg name="grid_direction" value="0"/>
+    <arg name="coordinate_X" value="1.5"/>
+    <arg name="coordinate_Y" value="1.5"/>
+    <arg name="minZ_rotate" value="2.0"/>
+    <arg name="maxZ_rotate" value="10"/>
+    <arg name="radius_R" value="1.7"/>
+    <arg name="numSpiralSegments" value="4"/>
+    <arg name="stepZ_rotate" value="0.5"/>
+    <arg name="flight_type" value="3"/>
+  </include>
+
+  <!-- UAV 1 的 LiDAR 相对定位模块 -->
+  <group if="$(arg enable_lidar_detect)">
+    <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
+      <arg name="drone_id" value="$(arg uav_id_1)"/>
+      <arg name="lidar_topic" value="/uav$(arg uav_id_1)/pcl_render_node/cloud"/>
+      <arg name="odom_topic" value="/uav$(arg uav_id_1)/$(arg odom_topic)"/>
+      <arg name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
+      <arg name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
+      <arg name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
+      <arg name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
+      <arg name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
+      <arg name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
+      <arg name="icp_overlap_radius" value="$(arg icp_overlap_radius)"/>
+      <arg name="max_features" value="$(arg max_features)"/>
+      <arg name="broadcast_ip" value="255.255.255.255"/>
+      <arg name="next_drone_ip" value="127.0.0.1"/>
+    </include>
+  </group>
+
+  <!-- ========================================================================
+       3. UAV 2 配置
+       ======================================================================== -->
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
+    <arg name="uav_id" value="$(arg uav_id_2)"/>
+    <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="lidar_type" value="mid360"/>
+    <arg name="init_x" value="3.0"/>
+    <arg name="init_y" value="-3.0"/>
+    <arg name="init_z" value="$(arg init_z)"/>
+    <arg name="init_yaw" value="1.5708"/>
+    <arg name="map_size_x" value="$(arg map_size_x)"/>
+    <arg name="map_size_y" value="$(arg map_size_y)"/>
+    <arg name="map_size_z" value="$(arg map_size_z)"/>
+    <arg name="map_name" value="$(arg map_name)"/>
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num" value="$(arg obj_num)"/>
+    <arg name="use_gpu" value="$(arg use_gpu_)"/>
+    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
+    <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
+
+    <!-- UAV 2 路径生成参数：右侧区域，沿 Y 方向运动 -->
+    <arg name="box_min_x" value="3.0"/>
+    <arg name="box_min_y" value="-3.0"/>
+    <arg name="box_min_z" value="2.0"/>
+    <arg name="box_max_x" value="9.0"/>
+    <arg name="box_max_y" value="9.0"/>
+    <arg name="box_max_z" value="3.0"/>
+    <arg name="step_X" value="3.0"/>
+    <arg name="step_Y" value="3.0"/>
+    <arg name="step_Z" value="2.0"/>
+    <arg name="waypointDistriFlag" value="0"/>
+    <arg name="grid_direction" value="1"/>
+    <arg name="coordinate_X" value="1.5"/>
+    <arg name="coordinate_Y" value="1.5"/>
+    <arg name="minZ_rotate" value="2.0"/>
+    <arg name="maxZ_rotate" value="10"/>
+    <arg name="radius_R" value="1.7"/>
+    <arg name="numSpiralSegments" value="4"/>
+    <arg name="stepZ_rotate" value="0.5"/>
+    <arg name="flight_type" value="3"/>
+  </include>
+
+  <!-- UAV 2 的 LiDAR 相对定位模块 -->
+  <group if="$(arg enable_lidar_detect)">
+    <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
+      <arg name="drone_id" value="$(arg uav_id_2)"/>
+      <arg name="lidar_topic" value="/uav$(arg uav_id_2)/pcl_render_node/cloud"/>
+      <arg name="odom_topic" value="/uav$(arg uav_id_2)/$(arg odom_topic)"/>
+      <arg name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
+      <arg name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
+      <arg name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
+      <arg name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
+      <arg name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
+      <arg name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
+      <arg name="icp_overlap_radius" value="$(arg icp_overlap_radius)"/>
+      <arg name="max_features" value="$(arg max_features)"/>
+      <arg name="broadcast_ip" value="255.255.255.255"/>
+      <arg name="next_drone_ip" value="127.0.0.1"/>
+    </include>
+  </group>
+
+  <!-- ========================================================================
+       4. 通信桥接 (复用现有 rosmsg_tcp_bridge)
+       ======================================================================== -->
+  <!-- UAV 1 的通信桥接 -->
+  <node pkg="rosmsg_tcp_bridge" type="bridge_node" name="uav$(arg uav_id_1)_bridge" output="screen">
+    <param name="next_drone_ip" value="127.0.0.1"/>
+    <param name="broadcast_ip" value="255.255.255.255"/>
+    <param name="drone_id" value="$(arg uav_id_1)"/>
+    <param name="odom_max_freq" value="100.0"/>
+  </node>
+
+  <!-- ========================================================================
+       5. RViz 可视化
+       ======================================================================== -->
+  <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
+        args="-d $(find drone_detect_lidar)/rviz/lidar_detect.rviz"/>
+
+</launch>

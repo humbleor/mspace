@@ -1,0 +1,164 @@
+<launch>
+  <!-- ========================================================================
+       Drone Detect LiDAR - Single UAV Launch File
+       LiDAR 特征提取与相对定位模块
+       ======================================================================== -->
+
+  <arg name="drone_id" default="1"/>
+  <arg name="lidar_topic" default="/lidar_cloud"/>
+  <arg name="odom_topic" default="/odometry"/>
+
+  <!-- ICP 参数 -->
+  <arg name="icp_max_iterations" default="30"/>
+  <arg name="icp_trans_epsilon" default="0.001"/>
+  <arg name="icp_fitness_thresh" default="5.0"/>
+  <arg name="icp_corr_dist" default="1.5"/>
+  <arg name="icp_use_point_to_plane" default="true"/>
+  <arg name="icp_min_inliers" default="5"/>
+  <arg name="icp_overlap_radius" default="2.0"/>
+
+  <!-- 特征提取参数 -->
+  <arg name="voxel_size" default="0.2"/>
+  <arg name="max_features" default="50"/>
+  <arg name="corner_threshold" default="0.1"/>
+  <arg name="planar_threshold" default="0.05"/>
+
+  <!-- 通信参数 -->
+  <arg name="broadcast_ip" default="255.255.255.255"/>
+  <arg name="broadcast_port" default="9001"/>
+  <arg name="next_drone_ip" default="127.0.0.1"/>
+
+  <!-- 计算参数 -->
+  <arg name="compute_frequency" default="5.0"/>
+  <arg name="neighbor_timeout" default="5.0"/>
+
+  <!-- 调试参数 -->
+  <arg name="enable_debug" default="true"/>
+  <arg name="verbose_logging" default="false"/>
+
+  <!-- ========================================================================
+       1. 加载参数
+       ======================================================================== -->
+  <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
+
+  <!-- 覆盖参数 -->
+  <param name="drone_id" value="$(arg drone_id)"/>
+  <param name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
+  <param name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
+  <param name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
+  <param name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
+  <param name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
+  <param name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
+  <param name="voxel_size" value="$(arg voxel_size)"/>
+  <param name="corner_threshold" value="$(arg corner_threshold)"/>
+  <param name="planar_threshold" value="$(arg planar_threshold)"/>
+  <param name="compute_frequency" value="$(arg compute_frequency)"/>
+  <param name="neighbor_timeout" value="$(arg neighbor_timeout)"/>
+  <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
+  <param name="broadcast_port" value="$(arg broadcast_port)"/>
+
+  <!-- ========================================================================
+       2. 特征提取节点
+       ======================================================================== -->
+  <node pkg="drone_detect_lidar" type="feature_extractor_node"
+        name="drone_$(arg drone_id)_feature_extractor" output="screen" required="true">
+    <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="lidar_topic" value="$(arg lidar_topic)"/>
+    <param name="odom_topic" value="$(arg odom_topic)"/>
+    <param name="voxel_size" value="$(arg voxel_size)"/>
+    <param name="max_features" value="$(arg max_features)"/>
+    <param name="corner_threshold" value="$(arg corner_threshold)"/>
+    <param name="planar_threshold" value="$(arg planar_threshold)"/>
+    <param name="publish_frequency" value="$(arg compute_frequency)"/>
+
+    <remap from="~feature_cloud" to="/uav$(arg drone_id)/feature_cloud"/>
+    <remap from="~feature_cloud_debug" to="/uav$(arg drone_id)/feature_cloud_debug"/>
+  </node>
+
+  <!-- ========================================================================
+       3. 相对定位解算节点
+       ======================================================================== -->
+  <node pkg="drone_detect_lidar" type="relative_loc_node"
+        name="drone_$(arg drone_id)_relative_loc" output="screen" required="true">
+    <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="odom_topic" value="$(arg odom_topic)"/>
+    <param name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
+    <param name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
+    <param name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
+    <param name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
+    <param name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
+    <param name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
+    <param name="icp_overlap_radius" value="$(arg icp_overlap_radius)"/>
+    <param name="compute_frequency" value="$(arg compute_frequency)"/>
+    <param name="neighbor_timeout" value="$(arg neighbor_timeout)"/>
+
+    <remap from="~received_feature_cloud" to="/uav$(arg drone_id)/received_feature_cloud"/>
+    <remap from="~neighbor_odom" to="/uav$(arg drone_id)/neighbor_odom"/>
+    <remap from="~local_map" to="/uav$(arg drone_id)/local_map"/>
+    <remap from="~relative_pose" to="/uav$(arg drone_id)/relative_pose"/>
+    <remap from="~pose_error" to="/uav$(arg drone_id)/pose_error"/>
+    <remap from="~icp_fitness" to="/uav$(arg drone_id)/icp_fitness"/>
+  </node>
+
+  <!-- ========================================================================
+       4. 特征广播节点 (复用 rosmsg_tcp_bridge 或独立实现)
+       ======================================================================== -->
+  <!-- 注意：这里可以使用现有的 rosmsg_tcp_bridge，也可以单独实现 -->
+  <!-- 如果使用独立实现，取消下面注释 -->
+  <!--
+  <node pkg="drone_detect_lidar" type="broadcast_feature_node"
+        name="drone_$(arg drone_id)_broadcast" output="screen">
+    <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
+    <param name="broadcast_port" value="$(arg broadcast_port)"/>
+
+    <remap from="~feature_cloud_in" to="/uav$(arg drone_id)/feature_cloud"/>
+    <remap from="~feature_cloud_out" to="/broadcast_feature_cloud"/>
+  </node>
+  -->
+
+  <!-- ========================================================================
+       5. 调试可视化 (可选)
+       ======================================================================== -->
+  <group if="$(arg enable_debug)">
+    <node pkg="topic_tools" type="relay" name="drone_$(arg drone_id)_debug_feature_relay"
+          args="/uav$(arg drone_id)/feature_cloud_debug /uav$(arg drone_id)/feature_cloud_debug_relay"/>
+  </group>
+
+  <!-- ========================================================================
+       6. 邻居特征云转发 (用于仿真测试)
+       将其他无人机的 feature_cloud 转发到 received_feature_cloud
+       ======================================================================== -->
+  <!-- UAV1 接收 UAV2 的特征云 -->
+  <group if="$(eval drone_id == 1)">
+    <node pkg="topic_tools" type="relay" name="uav2_to_uav1_feature_relay"
+          args="/uav2/feature_cloud /uav1/received_feature_cloud"/>
+  </group>
+  <!-- UAV2 接收 UAV1 的特征云 -->
+  <group if="$(eval drone_id == 2)">
+    <node pkg="topic_tools" type="relay" name="uav1_to_uav2_feature_relay"
+          args="/uav1/feature_cloud /uav2/received_feature_cloud"/>
+  </group>
+
+  <!-- ========================================================================
+       7. 局部地图转发 (将 LiDAR 点云转发到 local_map 供 ICP 使用)
+       ======================================================================== -->
+  <node pkg="topic_tools" type="relay" name="drone_$(arg drone_id)_local_map_relay"
+        args="/uav$(arg drone_id)/pcl_render_node/cloud /uav$(arg drone_id)/local_map"/>
+
+  <!-- ========================================================================
+       8. 邻居里程计转发 (用于仿真测试)
+       UAV1 接收 UAV2 的 odom, UAV2 接收 UAV1 的 odom
+       ======================================================================== -->
+  <!-- UAV1 接收 UAV2 的里程计 -->
+  <group if="$(eval drone_id == 1)">
+    <node pkg="topic_tools" type="relay" name="uav2_to_uav1_odom_relay"
+          args="/uav2/lidar_slam/odom /uav1/neighbor_odom"/>
+  </group>
+  <!-- UAV2 接收 UAV1 的里程计 -->
+  <group if="$(eval drone_id == 2)">
+    <node pkg="topic_tools" type="relay" name="uav1_to_uav2_odom_relay"
+          args="/uav1/lidar_slam/odom /uav2/neighbor_odom"/>
+  </group>
+
+</launch>
