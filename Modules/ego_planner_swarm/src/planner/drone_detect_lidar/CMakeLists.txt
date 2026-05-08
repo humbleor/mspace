@@ -23,25 +23,47 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   tf2_ros
   eigen_conversions
+  message_generation
 )
 
 ## Find system libraries
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common io filters kdtree search registration)
+find_package(PCL REQUIRED COMPONENTS common io filters kdtree search segmentation)
 find_package(OpenCV REQUIRED)
+find_package(GTSAM QUIET)
+
+if(GTSAM_FOUND)
+  message(STATUS "GTSAM found")
+  add_definitions(-DHAVE_GTSAM)
+else()
+  message(WARNING "GTSAM not found. tree_graph_node will not be built.")
+endif()
 
 ###################################
 ## catkin specific configuration ##
 ###################################
+
+## Generate custom messages
+add_message_files(
+  FILES
+  Tree.msg
+  TreeDetection.msg
+  TreeRelativePose.msg
+  TreeRelativePoseOptimized.msg
+)
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+  nav_msgs
+)
+
 catkin_package(
   INCLUDE_DIRS
     include
     ${EIGEN3_INCLUDE_DIR}
     ${PCL_INCLUDE_DIRS}
   LIBRARIES
-    ${PROJECT_NAME}_feature_extractor
-    ${PROJECT_NAME}_icp_wrapper
-    ${PROJECT_NAME}_pose_fusion
+    ${PROJECT_NAME}_tree_detector
   CATKIN_DEPENDS
     roscpp
     std_msgs
@@ -51,10 +73,12 @@ catkin_package(
     pcl_ros
     message_filters
     tf2
+    message_runtime
   DEPENDS
     EIGEN3
     PCL
     OpenCV
+    GTSAM
 )
 
 ###########
@@ -81,52 +105,47 @@ add_definitions(
   -DEIGEN_NO_DEBUG
 )
 
-## Libraries
-add_library(${PROJECT_NAME}_feature_extractor
-  src/feature_extractor.cpp
+## Tree detector library
+add_library(${PROJECT_NAME}_tree_detector
+  src/tree_detector.cpp
 )
-target_link_libraries(${PROJECT_NAME}_feature_extractor
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-)
-
-add_library(${PROJECT_NAME}_icp_wrapper
-  src/icp_wrapper.cpp
-)
-target_link_libraries(${PROJECT_NAME}_icp_wrapper
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
-)
-
-add_library(${PROJECT_NAME}_pose_fusion
-  src/pose_fusion.cpp
-)
-target_link_libraries(${PROJECT_NAME}_pose_fusion
-  ${PROJECT_NAME}_feature_extractor
-  ${PROJECT_NAME}_icp_wrapper
+target_link_libraries(${PROJECT_NAME}_tree_detector
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
 )
 
 ## Executables
-add_executable(feature_extractor_node src/feature_extractor_node.cpp)
-target_link_libraries(feature_extractor_node
-  ${PROJECT_NAME}_feature_extractor
+add_executable(tree_detector_node src/tree_detector_node.cpp)
+target_link_libraries(tree_detector_node
+  ${PROJECT_NAME}_tree_detector
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
+)
+add_dependencies(tree_detector_node
+  ${PROJECT_NAME}_tree_detector
+  ${catkin_EXPORTED_TARGETS}
 )
 
-add_executable(relative_loc_node src/relative_loc_node.cpp)
-target_link_libraries(relative_loc_node
-  ${PROJECT_NAME}_pose_fusion
-  ${PROJECT_NAME}_feature_extractor
-  ${PROJECT_NAME}_icp_wrapper
+add_executable(tree_loc_node src/tree_loc_node.cpp)
+target_link_libraries(tree_loc_node
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
 )
+add_dependencies(tree_loc_node
+  ${catkin_EXPORTED_TARGETS}
+)
+
+if(GTSAM_FOUND)
+  add_executable(tree_graph_node src/tree_graph_node.cpp)
+  target_link_libraries(tree_graph_node
+    ${catkin_LIBRARIES}
+    gtsam
+  )
+  add_dependencies(tree_graph_node
+    ${catkin_EXPORTED_TARGETS}
+  )
+endif()
 
 #############
 ## Install ##
@@ -134,15 +153,20 @@ target_link_libraries(relative_loc_node
 
 ## Install targets
 install(TARGETS
-  ${PROJECT_NAME}_feature_extractor
-  ${PROJECT_NAME}_icp_wrapper
-  ${PROJECT_NAME}_pose_fusion
-  feature_extractor_node
-  relative_loc_node
+  ${PROJECT_NAME}_tree_detector
+  tree_detector_node
+  tree_loc_node
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+if(GTSAM_FOUND)
+  install(TARGETS
+    tree_graph_node
+    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+  )
+endif()
 
 ## Install headers
 install(DIRECTORY include/${PROJECT_NAME}/

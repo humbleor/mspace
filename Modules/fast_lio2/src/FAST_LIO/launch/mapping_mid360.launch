@@ -17,7 +17,7 @@
 
     <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen" /> 
 
-	<arg name="rviz" default="false" />
+	<arg name="rviz" default="true" />
 	<group if="$(arg rviz)">
     	<node launch-prefix="nice" pkg="rviz" type="rviz" name="drone_rviz_fastlio" 
 			args="-d $(find fast_lio)/rviz_cfg/loam_livox.rviz" />

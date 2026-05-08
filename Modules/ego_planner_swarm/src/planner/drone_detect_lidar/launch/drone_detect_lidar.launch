@@ -1,164 +1,165 @@
 <launch>
   <!-- ========================================================================
        Drone Detect LiDAR - Single UAV Launch File
-       LiDAR 特征提取与相对定位模块
+       基于树干特征匹配的森林场景多机相对定位
        ======================================================================== -->
 
   <arg name="drone_id" default="1"/>
-  <arg name="lidar_topic" default="/lidar_cloud"/>
-  <arg name="odom_topic" default="/odometry"/>
+  <arg name="odom_topic" default="lidar_slam/odom"/>
 
-  <!-- ICP 参数 -->
-  <arg name="icp_max_iterations" default="30"/>
-  <arg name="icp_trans_epsilon" default="0.001"/>
-  <arg name="icp_fitness_thresh" default="5.0"/>
-  <arg name="icp_corr_dist" default="1.5"/>
-  <arg name="icp_use_point_to_plane" default="true"/>
-  <arg name="icp_min_inliers" default="5"/>
-  <arg name="icp_overlap_radius" default="2.0"/>
+  <!-- 计算参数 -->
+  <arg name="compute_frequency" default="5.0"/>
 
-  <!-- 特征提取参数 -->
-  <arg name="voxel_size" default="0.2"/>
-  <arg name="max_features" default="50"/>
-  <arg name="corner_threshold" default="0.1"/>
-  <arg name="planar_threshold" default="0.05"/>
+  <!-- 树检测参数 -->
+  <arg name="tree_height_min" default="0.3"/>
+  <arg name="tree_height_max" default="3.0"/>
+  <arg name="tree_voxel_size" default="0.15"/>
+  <arg name="tree_cluster_tolerance" default="0.3"/>
+  <arg name="tree_min_cluster_size" default="20"/>
+  <arg name="tree_max_cluster_size" default="5000"/>
+  <arg name="tree_linearity_threshold" default="0.6"/>
+  <!-- 树匹配参数 -->
+  <arg name="triangle_min_side" default="0.3"/>
+  <arg name="triangle_max_side" default="20.0"/>
+  <arg name="isosceles_threshold" default="0.1"/>
+  <arg name="equilateral_threshold" default="0.15"/>
+  <arg name="rough_dis_ratio" default="0.05"/>
+  <arg name="geom_verify_dist" default="0.3"/>
+  <arg name="min_common_trees" default="3"/>
+  <arg name="drone_dist_threshold" default="15.0"/>
+  <arg name="max_translation" default="3.0"/>
+  <arg name="max_yaw_deg" default="20.0"/>
+  <arg name="max_match_residual" default="0.5"/>
+
+  <!-- 因子图优化 -->
+  <arg name="enable_graph_opt" default="false"/>
+  <arg name="anchor_drone_id" default="1"/>
+  <arg name="optimize_freq" default="5.0"/>
+  <arg name="window_size" default="10"/>
 
   <!-- 通信参数 -->
   <arg name="broadcast_ip" default="255.255.255.255"/>
   <arg name="broadcast_port" default="9001"/>
   <arg name="next_drone_ip" default="127.0.0.1"/>
 
-  <!-- 计算参数 -->
-  <arg name="compute_frequency" default="5.0"/>
-  <arg name="neighbor_timeout" default="5.0"/>
-
-  <!-- 调试参数 -->
-  <arg name="enable_debug" default="true"/>
-  <arg name="verbose_logging" default="false"/>
+  <!-- 中继开关 (仿真用，3UAV场景需关掉由外部统一管理) -->
+  <arg name="enable_relay" default="true"/>
 
   <!-- ========================================================================
        1. 加载参数
        ======================================================================== -->
   <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
 
-  <!-- 覆盖参数 -->
+  <!-- 参数覆盖 -->
   <param name="drone_id" value="$(arg drone_id)"/>
-  <param name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
-  <param name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
-  <param name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
-  <param name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
-  <param name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
-  <param name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
-  <param name="voxel_size" value="$(arg voxel_size)"/>
-  <param name="corner_threshold" value="$(arg corner_threshold)"/>
-  <param name="planar_threshold" value="$(arg planar_threshold)"/>
   <param name="compute_frequency" value="$(arg compute_frequency)"/>
-  <param name="neighbor_timeout" value="$(arg neighbor_timeout)"/>
   <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
   <param name="broadcast_port" value="$(arg broadcast_port)"/>
 
-  <!-- ========================================================================
-       2. 特征提取节点
-       ======================================================================== -->
-  <node pkg="drone_detect_lidar" type="feature_extractor_node"
-        name="drone_$(arg drone_id)_feature_extractor" output="screen" required="true">
-    <param name="drone_id" value="$(arg drone_id)"/>
-    <param name="lidar_topic" value="$(arg lidar_topic)"/>
-    <param name="odom_topic" value="$(arg odom_topic)"/>
-    <param name="voxel_size" value="$(arg voxel_size)"/>
-    <param name="max_features" value="$(arg max_features)"/>
-    <param name="corner_threshold" value="$(arg corner_threshold)"/>
-    <param name="planar_threshold" value="$(arg planar_threshold)"/>
-    <param name="publish_frequency" value="$(arg compute_frequency)"/>
+  <param name="tree_height_min" value="$(arg tree_height_min)"/>
+  <param name="tree_height_max" value="$(arg tree_height_max)"/>
+  <param name="tree_voxel_size" value="$(arg tree_voxel_size)"/>
+  <param name="tree_cluster_tolerance" value="$(arg tree_cluster_tolerance)"/>
+  <param name="tree_min_cluster_size" value="$(arg tree_min_cluster_size)"/>
+  <param name="tree_max_cluster_size" value="$(arg tree_max_cluster_size)"/>
+  <param name="tree_linearity_threshold" value="$(arg tree_linearity_threshold)"/>
+  <param name="triangle_min_side" value="$(arg triangle_min_side)"/>
+  <param name="triangle_max_side" value="$(arg triangle_max_side)"/>
+  <param name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
+  <param name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
+  <param name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
+  <param name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
+  <param name="min_common_trees" value="$(arg min_common_trees)"/>
+  <param name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
+  <param name="max_translation" value="$(arg max_translation)"/>
+  <param name="max_yaw_deg" value="$(arg max_yaw_deg)"/>
+  <param name="max_match_residual" value="$(arg max_match_residual)"/>
 
-    <remap from="~feature_cloud" to="/uav$(arg drone_id)/feature_cloud"/>
-    <remap from="~feature_cloud_debug" to="/uav$(arg drone_id)/feature_cloud_debug"/>
+  <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
+  <param name="optimize_freq" value="$(arg optimize_freq)"/>
+  <param name="window_size" value="$(arg window_size)"/>
+
+  <!-- ========================================================================
+       2. 树检测器节点
+       ======================================================================== -->
+  <node pkg="drone_detect_lidar" type="tree_detector_node"
+        name="drone_$(arg drone_id)_tree_detector" output="screen">
+    <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="frame_id" value="world"/>
+
+    <remap from="~lidar_cloud" to="/uav$(arg drone_id)/pcl_render_node/cloud"/>
+    <remap from="~odom" to="/uav$(arg drone_id)/$(arg odom_topic)"/>
+    <remap from="~tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
+    <remap from="~tree_cloud" to="/uav$(arg drone_id)/tree_cloud"/>
   </node>
 
   <!-- ========================================================================
-       3. 相对定位解算节点
+       3. 树匹配定位节点
        ======================================================================== -->
-  <node pkg="drone_detect_lidar" type="relative_loc_node"
-        name="drone_$(arg drone_id)_relative_loc" output="screen" required="true">
+  <node pkg="drone_detect_lidar" type="tree_loc_node"
+        name="drone_$(arg drone_id)_tree_loc" output="screen">
     <param name="drone_id" value="$(arg drone_id)"/>
-    <param name="odom_topic" value="$(arg odom_topic)"/>
-    <param name="icp_max_iterations" value="$(arg icp_max_iterations)"/>
-    <param name="icp_trans_epsilon" value="$(arg icp_trans_epsilon)"/>
-    <param name="icp_fitness_thresh" value="$(arg icp_fitness_thresh)"/>
-    <param name="icp_corr_dist" value="$(arg icp_corr_dist)"/>
-    <param name="icp_use_point_to_plane" value="$(arg icp_use_point_to_plane)"/>
-    <param name="icp_min_inliers" value="$(arg icp_min_inliers)"/>
-    <param name="icp_overlap_radius" value="$(arg icp_overlap_radius)"/>
     <param name="compute_frequency" value="$(arg compute_frequency)"/>
-    <param name="neighbor_timeout" value="$(arg neighbor_timeout)"/>
+    <param name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
+    <param name="triangle_min_side" value="$(arg triangle_min_side)"/>
+    <param name="triangle_max_side" value="$(arg triangle_max_side)"/>
+    <param name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
+    <param name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
+    <param name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
+    <param name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
+    <param name="min_common_trees" value="$(arg min_common_trees)"/>
 
-    <remap from="~received_feature_cloud" to="/uav$(arg drone_id)/received_feature_cloud"/>
+    <remap from="~self_tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
+    <remap from="~neighbor_tree_detection" to="/uav$(arg drone_id)/neighbor_tree_detection"/>
+    <remap from="~self_odom" to="/uav$(arg drone_id)/$(arg odom_topic)"/>
     <remap from="~neighbor_odom" to="/uav$(arg drone_id)/neighbor_odom"/>
-    <remap from="~local_map" to="/uav$(arg drone_id)/local_map"/>
-    <remap from="~relative_pose" to="/uav$(arg drone_id)/relative_pose"/>
-    <remap from="~pose_error" to="/uav$(arg drone_id)/pose_error"/>
-    <remap from="~icp_fitness" to="/uav$(arg drone_id)/icp_fitness"/>
+    <remap from="~tree_pose_error" to="/uav$(arg drone_id)/tree_pose_error"/>
+    <remap from="~tree_relative_pose" to="/uav$(arg drone_id)/tree_relative_pose"/>
+    <remap from="~tree_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
+    <remap from="~matched_tree_pairs" to="/uav$(arg drone_id)/matched_tree_pairs"/>
   </node>
 
   <!-- ========================================================================
-       4. 特征广播节点 (复用 rosmsg_tcp_bridge 或独立实现)
+       4. 因子图优化节点 (可选，仅 anchor drone 启动)
        ======================================================================== -->
-  <!-- 注意：这里可以使用现有的 rosmsg_tcp_bridge，也可以单独实现 -->
-  <!-- 如果使用独立实现，取消下面注释 -->
-  <!--
-  <node pkg="drone_detect_lidar" type="broadcast_feature_node"
-        name="drone_$(arg drone_id)_broadcast" output="screen">
-    <param name="drone_id" value="$(arg drone_id)"/>
-    <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
-    <param name="broadcast_port" value="$(arg broadcast_port)"/>
-
-    <remap from="~feature_cloud_in" to="/uav$(arg drone_id)/feature_cloud"/>
-    <remap from="~feature_cloud_out" to="/broadcast_feature_cloud"/>
-  </node>
-  -->
-
-  <!-- ========================================================================
-       5. 调试可视化 (可选)
-       ======================================================================== -->
-  <group if="$(arg enable_debug)">
-    <node pkg="topic_tools" type="relay" name="drone_$(arg drone_id)_debug_feature_relay"
-          args="/uav$(arg drone_id)/feature_cloud_debug /uav$(arg drone_id)/feature_cloud_debug_relay"/>
+  <group if="$(arg enable_graph_opt)">
+    <group if="$(eval drone_id == anchor_drone_id)">
+      <node pkg="drone_detect_lidar" type="tree_graph_node"
+            name="tree_graph" output="screen">
+        <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
+        <param name="optimize_freq" value="$(arg optimize_freq)"/>
+        <param name="min_common_trees" value="$(arg min_common_trees)"/>
+        <param name="window_size" value="$(arg window_size)"/>
+        <remap from="~self_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
+        <remap from="~uav2_relative_pose_msg" to="/uav2/tree_relative_pose_msg"/>
+        <remap from="~uav3_relative_pose_msg" to="/uav3/tree_relative_pose_msg"/>
+        <remap from="~uav4_relative_pose_msg" to="/uav4/tree_relative_pose_msg"/>
+        <remap from="~uav5_relative_pose_msg" to="/uav5/tree_relative_pose_msg"/>
+        <remap from="~optimized_pose" to="/uav$(arg drone_id)/tree_relative_pose_optimized"/>
+      </node>
+    </group>
   </group>
 
   <!-- ========================================================================
-       6. 邻居特征云转发 (用于仿真测试)
-       将其他无人机的 feature_cloud 转发到 received_feature_cloud
+       5. 邻居里程计转发 (仿真测试)
        ======================================================================== -->
-  <!-- UAV1 接收 UAV2 的特征云 -->
-  <group if="$(eval drone_id == 1)">
-    <node pkg="topic_tools" type="relay" name="uav2_to_uav1_feature_relay"
-          args="/uav2/feature_cloud /uav1/received_feature_cloud"/>
-  </group>
-  <!-- UAV2 接收 UAV1 的特征云 -->
-  <group if="$(eval drone_id == 2)">
-    <node pkg="topic_tools" type="relay" name="uav1_to_uav2_feature_relay"
-          args="/uav1/feature_cloud /uav2/received_feature_cloud"/>
-  </group>
-
-  <!-- ========================================================================
-       7. 局部地图转发 (将 LiDAR 点云转发到 local_map 供 ICP 使用)
-       ======================================================================== -->
-  <node pkg="topic_tools" type="relay" name="drone_$(arg drone_id)_local_map_relay"
-        args="/uav$(arg drone_id)/pcl_render_node/cloud /uav$(arg drone_id)/local_map"/>
-
-  <!-- ========================================================================
-       8. 邻居里程计转发 (用于仿真测试)
-       UAV1 接收 UAV2 的 odom, UAV2 接收 UAV1 的 odom
-       ======================================================================== -->
+  <group if="$(arg enable_relay)">
   <!-- UAV1 接收 UAV2 的里程计 -->
   <group if="$(eval drone_id == 1)">
     <node pkg="topic_tools" type="relay" name="uav2_to_uav1_odom_relay"
           args="/uav2/lidar_slam/odom /uav1/neighbor_odom"/>
+    <!-- UAV1 接收 UAV2 的 tree_detection -->
+    <node pkg="topic_tools" type="relay" name="uav2_to_uav1_tree_relay"
+          args="/uav2/tree_detection /uav1/neighbor_tree_detection"/>
   </group>
   <!-- UAV2 接收 UAV1 的里程计 -->
   <group if="$(eval drone_id == 2)">
     <node pkg="topic_tools" type="relay" name="uav1_to_uav2_odom_relay"
           args="/uav1/lidar_slam/odom /uav2/neighbor_odom"/>
+    <!-- UAV2 接收 UAV1 的 tree_detection -->
+    <node pkg="topic_tools" type="relay" name="uav1_to_uav2_tree_relay"
+          args="/uav1/tree_detection /uav2/neighbor_tree_detection"/>
+  </group>
   </group>
 
 </launch>

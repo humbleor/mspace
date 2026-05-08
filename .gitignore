@@ -4,6 +4,7 @@ Modules/fast_lio2/src/FAST_LIO/PCD/*.pcd
 Modules/ego_planner_swarm/src/uav_simulator/lidar_map_generator/resource
 Scripts/flight_data/
 GEMINI.md
+# CLAUDE.md
 .catkin_tools
 .vscode
 

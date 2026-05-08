@@ -1,10 +1,9 @@
 <launch>
   <!-- ========================================================================
-       2 UAV LiDAR Detect Simulation Launch File
-       基于树干特征匹配的森林场景多机相对定位
+       3 UAV LiDAR Detect Simulation Launch File
+       基于树干特征匹配的森林场景多机相对定位 (3机 + 因子图优化)
        ======================================================================== -->
 
-  <!-- GPU 加速选项 -->
   <arg name="use_gpu_" value="false"/>
 
   <!-- 地图尺寸 -->
@@ -12,58 +11,30 @@
   <arg name="map_size_y" value="100.0"/>
   <arg name="map_size_z" value="10.0"/>
 
-  <!-- 无人机数量和 ID (从 1 开始) -->
+  <!-- 无人机 ID -->
   <arg name="uav_id_1" value="1"/>
   <arg name="uav_id_2" value="2"/>
-  <arg name="uav_num" value="2"/>
+  <arg name="uav_id_3" value="3"/>
+  <arg name="uav_num" value="3"/>
 
   <!-- 初始位置 -->
   <arg name="init_x" value="0.0"/>
   <arg name="init_y" value="0.0"/>
   <arg name="init_z" value="0.1"/>
 
-  <!-- 坐标系 -->
   <arg name="frame_id" value="world"/>
   <arg name="global_cloud_topic" value="/map_generator/global_cloud"/>
-
-  <!-- 里程计话题 (LIO 输出) -->
   <arg name="odom_topic" value="lidar_slam/odom"/>
-
-  <!-- 移动障碍物数量 -->
   <arg name="obj_num" value="0"/>
 
-  <!-- 地图文件 (PCD) -->
-  <!-- <arg name="map_name" value="$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/> -->
-  <!-- <arg name="map_name" value="$(env HOME)/bagfiles/102_ds01.pcd"/> -->
-  <arg name="map_name" value="$(env HOME)/bagfiles/003_ds01.pcd"/>
+  <!-- 地图文件 -->
+  <arg name="map_name" value="$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd"/>
   <arg name="downsample_resolution" value="0.1"/>
   <arg name="use_uav_extra_model" value="0"/>
 
-  <!-- ========================================================================
-       1. 地图发布
-       ======================================================================== -->
-  <group if="$(arg use_gpu_)">
-    <node pkg="lidar_map_generator" name="map_pub1" type="map_pub" output="screen"
-          args="$(arg map_name)">
-      <param name="downsample_res" value="0.1"/>
-      <param name="map_offset_x" value="11.0"/>
-      <param name="map_offset_y" value="-7.0"/>
-      <param name="map_offset_z" value="-3.0"/>
-    </node>
-  </group>
-
-  <group unless="$(arg use_gpu_)">
-    <node pkg="lidar_map_generator" name="map_pub2" type="map_pub" output="screen"
-          args="$(arg map_name)">
-      <param name="downsample_res" value="$(arg downsample_resolution)"/>
-      <param name="map_offset_x" value="9.0"/>
-      <param name="map_offset_y" value="-11.0"/>
-      <param name="map_offset_z" value="-3.0"/>
-    </node>
-  </group>
-
   <!-- 树干检测与配准参数 -->
   <arg name="enable_lidar_detect" value="true"/>
+  <arg name="enable_graph_opt" value="true"/>
   <arg name="compute_frequency" value="5.0"/>
   <arg name="tree_height_min" value="0.3"/>
   <arg name="tree_height_max" value="3.0"/>
@@ -77,7 +48,18 @@
   <arg name="drone_dist_threshold" value="15.0"/>
 
   <!-- ========================================================================
-       2. UAV 1 配置
+       1. 地图发布
+       ======================================================================== -->
+  <node pkg="lidar_map_generator" name="map_pub" type="map_pub" output="screen"
+        args="$(arg map_name)">
+    <param name="downsample_res" value="$(arg downsample_resolution)"/>
+    <param name="map_offset_x" value="9.0"/>
+    <param name="map_offset_y" value="-11.0"/>
+    <param name="map_offset_z" value="-3.0"/>
+  </node>
+
+  <!-- ========================================================================
+       2. UAV 1 (anchor)
        ======================================================================== -->
   <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="$(arg uav_id_1)"/>
@@ -95,8 +77,6 @@
     <arg name="use_gpu" value="$(arg use_gpu_)"/>
     <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
     <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
-
-    <!-- UAV 1 路径生成参数 -->
     <arg name="box_min_x" value="0.0"/>
     <arg name="box_min_y" value="0.0"/>
     <arg name="box_min_z" value="2.0"/>
@@ -118,7 +98,6 @@
     <arg name="flight_type" value="3"/>
   </include>
 
-  <!-- UAV 1 的树干相对定位模块 -->
   <group if="$(arg enable_lidar_detect)">
     <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
       <arg name="drone_id" value="$(arg uav_id_1)"/>
@@ -134,13 +113,16 @@
       <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
       <arg name="min_common_trees" value="$(arg min_common_trees)"/>
       <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
+      <arg name="enable_graph_opt" value="$(arg enable_graph_opt)"/>
+      <arg name="anchor_drone_id" value="$(arg uav_id_1)"/>
+      <arg name="enable_relay" value="false"/>
       <arg name="broadcast_ip" value="255.255.255.255"/>
       <arg name="next_drone_ip" value="127.0.0.1"/>
     </include>
   </group>
 
   <!-- ========================================================================
-       3. UAV 2 配置
+       3. UAV 2
        ======================================================================== -->
   <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="$(arg uav_id_2)"/>
@@ -159,8 +141,6 @@
     <arg name="use_gpu" value="$(arg use_gpu_)"/>
     <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
     <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
-
-    <!-- UAV 2 路径生成参数：右侧区域，沿 Y 方向运动 -->
     <arg name="box_min_x" value="3.0"/>
     <arg name="box_min_y" value="-3.0"/>
     <arg name="box_min_z" value="2.0"/>
@@ -182,7 +162,6 @@
     <arg name="flight_type" value="3"/>
   </include>
 
-  <!-- UAV 2 的树干相对定位模块 -->
   <group if="$(arg enable_lidar_detect)">
     <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
       <arg name="drone_id" value="$(arg uav_id_2)"/>
@@ -198,24 +177,102 @@
       <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
       <arg name="min_common_trees" value="$(arg min_common_trees)"/>
       <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
+      <arg name="enable_graph_opt" value="false"/>
+      <arg name="enable_relay" value="false"/>
       <arg name="broadcast_ip" value="255.255.255.255"/>
       <arg name="next_drone_ip" value="127.0.0.1"/>
     </include>
   </group>
 
   <!-- ========================================================================
-       4. 通信桥接 (复用现有 rosmsg_tcp_bridge)
+       4. UAV 3
        ======================================================================== -->
-  <!-- UAV 1 的通信桥接 -->
-  <node pkg="rosmsg_tcp_bridge" type="bridge_node" name="uav$(arg uav_id_1)_bridge" output="screen">
-    <param name="next_drone_ip" value="127.0.0.1"/>
-    <param name="broadcast_ip" value="255.255.255.255"/>
-    <param name="drone_id" value="$(arg uav_id_1)"/>
-    <param name="odom_max_freq" value="100.0"/>
-  </node>
+  <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
+    <arg name="uav_id" value="$(arg uav_id_3)"/>
+    <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="lidar_type" value="mid360"/>
+    <arg name="init_x" value="-3.0"/>
+    <arg name="init_y" value="3.0"/>
+    <arg name="init_z" value="$(arg init_z)"/>
+    <arg name="init_yaw" value="-1.5708"/>
+    <arg name="map_size_x" value="$(arg map_size_x)"/>
+    <arg name="map_size_y" value="$(arg map_size_y)"/>
+    <arg name="map_size_z" value="$(arg map_size_z)"/>
+    <arg name="map_name" value="$(arg map_name)"/>
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="obj_num" value="$(arg obj_num)"/>
+    <arg name="use_gpu" value="$(arg use_gpu_)"/>
+    <arg name="downsample_resolution_" value="$(arg downsample_resolution)"/>
+    <arg name="use_uav_extra_model_" value="$(arg use_uav_extra_model)"/>
+    <arg name="box_min_x" value="-9.0"/>
+    <arg name="box_min_y" value="0.0"/>
+    <arg name="box_min_z" value="2.0"/>
+    <arg name="box_max_x" value="-3.0"/>
+    <arg name="box_max_y" value="9.0"/>
+    <arg name="box_max_z" value="3.0"/>
+    <arg name="step_X" value="3.0"/>
+    <arg name="step_Y" value="3.0"/>
+    <arg name="step_Z" value="2.0"/>
+    <arg name="waypointDistriFlag" value="0"/>
+    <arg name="grid_direction" value="2"/>
+    <arg name="coordinate_X" value="1.5"/>
+    <arg name="coordinate_Y" value="1.5"/>
+    <arg name="minZ_rotate" value="2.0"/>
+    <arg name="maxZ_rotate" value="10"/>
+    <arg name="radius_R" value="1.7"/>
+    <arg name="numSpiralSegments" value="4"/>
+    <arg name="stepZ_rotate" value="0.5"/>
+    <arg name="flight_type" value="3"/>
+  </include>
+
+  <group if="$(arg enable_lidar_detect)">
+    <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
+      <arg name="drone_id" value="$(arg uav_id_3)"/>
+      <arg name="odom_topic" value="$(arg odom_topic)"/>
+      <arg name="compute_frequency" value="$(arg compute_frequency)"/>
+      <arg name="tree_height_min" value="$(arg tree_height_min)"/>
+      <arg name="tree_height_max" value="$(arg tree_height_max)"/>
+      <arg name="triangle_min_side" value="$(arg triangle_min_side)"/>
+      <arg name="triangle_max_side" value="$(arg triangle_max_side)"/>
+      <arg name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
+      <arg name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
+      <arg name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
+      <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
+      <arg name="min_common_trees" value="$(arg min_common_trees)"/>
+      <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
+      <arg name="enable_graph_opt" value="false"/>
+      <arg name="enable_relay" value="false"/>
+      <arg name="broadcast_ip" value="255.255.255.255"/>
+      <arg name="next_drone_ip" value="127.0.0.1"/>
+    </include>
+  </group>
 
   <!-- ========================================================================
-       5. RViz 可视化
+       5. 通信桥接 (3机拓扑)
+       ======================================================================== -->
+  <!-- UAV1: 接收 UAV2 的 odom + tree_detection (用于 tree_loc_node A-B 配对) -->
+  <node pkg="topic_tools" type="relay" name="uav2_to_uav1_odom_relay"
+        args="/uav2/lidar_slam/odom /uav1/neighbor_odom"/>
+  <node pkg="topic_tools" type="relay" name="uav2_to_uav1_tree_relay"
+        args="/uav2/tree_detection /uav1/neighbor_tree_detection"/>
+
+  <!-- UAV2: 接收 UAV1 的 odom + tree_detection (用于 tree_loc_node B-A 配对) -->
+  <node pkg="topic_tools" type="relay" name="uav1_to_uav2_odom_relay"
+        args="/uav1/lidar_slam/odom /uav2/neighbor_odom"/>
+  <node pkg="topic_tools" type="relay" name="uav1_to_uav2_tree_relay"
+        args="/uav1/tree_detection /uav2/neighbor_tree_detection"/>
+
+  <!-- UAV3: 接收 UAV1 的 odom + tree_detection (用于 tree_loc_node C-A 配对) -->
+  <node pkg="topic_tools" type="relay" name="uav1_to_uav3_odom_relay"
+        args="/uav1/lidar_slam/odom /uav3/neighbor_odom"/>
+  <node pkg="topic_tools" type="relay" name="uav1_to_uav3_tree_relay"
+        args="/uav1/tree_detection /uav3/neighbor_tree_detection"/>
+
+  <!-- tree_graph_node 需要接收所有 UAV 的 TreeRelativePose -->
+  <!-- tree_loc_node 已发布到 /uav*/tree_relative_pose_msg，无需额外 relay -->
+
+  <!-- ========================================================================
+       6. RViz 可视化
        ======================================================================== -->
   <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
         args="-d $(find drone_detect_lidar)/rviz/lidar_detect.rviz"/>
