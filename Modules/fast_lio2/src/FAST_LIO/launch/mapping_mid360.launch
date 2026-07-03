@@ -11,7 +11,7 @@
 	<param name="cube_side_length" type="double" value="1000" />
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
 
-	<remap from="/drone_cloud_bizhang" to="/uav$(arg uav_id)/drone_cloud_bizhang"/>
+	<remap from="/drone_cloud_registered" to="/uav$(arg uav_id)/drone_cloud_registered"/>
 	<!-- <remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/> -->
 	<remap from="/drone_Odom_high_freq" to="/uav$(arg uav_id)/drone_Odometry"/>
 

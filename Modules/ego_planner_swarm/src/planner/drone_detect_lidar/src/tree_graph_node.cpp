@@ -2,7 +2,7 @@
 #include "drone_detect_lidar/TreeRelativePose.h"
 #include "drone_detect_lidar/TreeRelativePoseOptimized.h"
 
-#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/ISAM2.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/slam/PriorFactor.h>
 #include <gtsam/slam/BetweenFactor.h>
@@ -16,37 +16,47 @@
 #include <cmath>
 
 /**
- * @brief 基于因子图的多机相对位姿优化节点
+ * @brief 基于 iSAM2 增量因子图的多机相对位姿优化节点
  *
- * 订阅所有 UAV 的 TreeRelativePose 消息，构建因子图：
- * - 先验因子：固定 anchor UAV 为参考系 (0, 0, 0)
- * - 相对位姿因子：每对有足够匹配树的 UAV 对
+ * 对比批量 Levenberg-Marquardt:
+ *   - LM: 每次重建整个因子图，全部变量重新线性化，O(N³) 每轮
+ *   - iSAM2: 持久化 Bayes tree，只对受影响变量增量更新，O(1) 每因子
  *
- * 求解后发布优化后的相对位姿
+ * 流程:
+ *   1. 滑窗平均各 UAV 对的测量值（降噪）
+ *   2. 新测量作为 BetweenFactor 增量添加到 iSAM2
+ *   3. iSAM2::update() — 仅重新线性化受影响 clique
+ *   4. calculateEstimate() 获取当前最优估计
+ *   5. 发布优化后的成对相对位姿
  */
 class TreeGraphNode {
 public:
   TreeGraphNode(ros::NodeHandle& nh)
-    : nh_(nh), anchor_drone_id_(1) {
+    : nh_(nh), anchor_drone_id_(1), graph_initialized_(false), total_factors_added_(0) {
 
     loadParameters();
 
+    // iSAM2 参数配置
+    gtsam::ISAM2Params isam2_params;
+    // 当线性化点偏移超过此阈值时触发重新线性化
+    isam2_params.relinearizeThreshold = 0.01;
+    // 每个 update 都检查是否需要重新线性化
+    isam2_params.relinearizeSkip = 1;
+    // 使用 QR 分解（CHOLESKY 更快但要求正定；QR 更稳健适合小图）
+    isam2_params.factorization = gtsam::ISAM2Params::QR;
+    isam2_ = gtsam::ISAM2(isam2_params);
+
     // 订阅各 UAV 的 tree_relative_pose_msg
-    // 使用 nh_.resolveName 配合 remap 实现灵活的话题绑定
     addSubscriber("self_relative_pose_msg");
     addSubscriber("uav2_relative_pose_msg");
     addSubscriber("uav3_relative_pose_msg");
-    addSubscriber("uav4_relative_pose_msg");
-    addSubscriber("uav5_relative_pose_msg");
 
-    // 发布优化后的结果
     opt_pub_ = nh_.advertise<drone_detect_lidar::TreeRelativePoseOptimized>("optimized_pose", 10);
 
-    // 定时器
     optimize_timer_ = nh_.createTimer(ros::Duration(1.0 / optimize_freq_),
                                        &TreeGraphNode::optimizeTimerCallback, this);
 
-    ROS_INFO("[TreeGraphNode] Initialized, anchor=uav%d, freq=%.1f Hz, subs=%zu",
+    ROS_INFO("[TreeGraphNode] iSAM2 initialized, anchor=uav%d, freq=%.1f Hz, subs=%zu",
              anchor_drone_id_, optimize_freq_, subs_.size());
   }
 
@@ -54,7 +64,6 @@ private:
   void addSubscriber(const std::string& topic_param) {
     std::string topic_name;
     if (!nh_.getParam(topic_param, topic_name)) {
-      // 未配置该话题，跳过
       return;
     }
     ros::Subscriber sub = nh_.subscribe<drone_detect_lidar::TreeRelativePose>(
@@ -89,7 +98,7 @@ private:
       return;
     }
 
-    // 对每对测量取平均（滑窗内）
+    // ---- 滑窗平均 ----
     struct AvgMeasurement {
       uint32_t src, dst;
       double dx, dy, yaw;
@@ -98,10 +107,9 @@ private:
     };
 
     std::map<uint32_t, AvgMeasurement> averaged;
-    for (std::map<uint32_t, std::deque<drone_detect_lidar::TreeRelativePose::ConstPtr> >::iterator
-         it = recent_measurements_.begin(); it != recent_measurements_.end(); ++it) {
+    for (auto it = recent_measurements_.begin(); it != recent_measurements_.end(); ++it) {
       uint32_t pair_id = it->first;
-      const std::deque<drone_detect_lidar::TreeRelativePose::ConstPtr>& deq = it->second;
+      const auto& deq = it->second;
       if (deq.empty()) continue;
 
       double sum_dx = 0, sum_dy = 0, sum_yaw_sin = 0, sum_yaw_cos = 0;
@@ -110,7 +118,7 @@ private:
       uint32_t src = 0, dst = 0;
 
       for (size_t i = 0; i < deq.size(); ++i) {
-        const drone_detect_lidar::TreeRelativePose::ConstPtr& m = deq[i];
+        const auto& m = deq[i];
         if (m->num_matched_trees < min_common_trees_) continue;
         src = m->src_drone_id;
         dst = m->dst_drone_id;
@@ -138,70 +146,96 @@ private:
 
     if (averaged.empty()) return;
 
-    // 确保锚点存在
     known_drone_ids_.insert(anchor_drone_id_);
 
-    // 构建因子图
-    gtsam::NonlinearFactorGraph graph;
-    gtsam::Values initial;
+    // ---- 构建增量因子图 ----
+    gtsam::NonlinearFactorGraph new_factors;
+    gtsam::Values new_initial;
 
-    // 锚点先验
-    gtsam::Pose2 anchor_pose(0.0, 0.0, 0.0);
-    gtsam::SharedNoiseModel anchor_noise =
-      gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(3) << 1e-6, 1e-6, 1e-6).finished());
-    graph.add(gtsam::PriorFactor<gtsam::Pose2>(anchor_drone_id_, anchor_pose, anchor_noise));
-    initial.insert(anchor_drone_id_, anchor_pose);
-
-    // 初始化其他无人机
-    for (std::set<uint32_t>::iterator it = known_drone_ids_.begin();
-         it != known_drone_ids_.end(); ++it) {
-      if (*it == static_cast<uint32_t>(anchor_drone_id_)) continue;
-      initial.insert(*it, gtsam::Pose2(0.0, 0.0, 0.0));
+    // 首次：添加锚点先验因子
+    if (!graph_initialized_) {
+      gtsam::Pose2 anchor_pose(0.0, 0.0, 0.0);
+      gtsam::SharedNoiseModel anchor_noise =
+        gtsam::noiseModel::Diagonal::Sigmas((gtsam::Vector(3) << 1e-6, 1e-6, 1e-6).finished());
+      new_factors.add(gtsam::PriorFactor<gtsam::Pose2>(anchor_drone_id_, anchor_pose, anchor_noise));
+      new_initial.insert(anchor_drone_id_, anchor_pose);
+      initialized_drone_ids_.insert(anchor_drone_id_);
+      graph_initialized_ = true;
     }
 
-    // 添加相对位姿因子
-    for (std::map<uint32_t, AvgMeasurement>::iterator it = averaged.begin();
-         it != averaged.end(); ++it) {
+    // 为新出现的无人机添加初始估计（第一次出现时需要的初值）
+    for (auto id : known_drone_ids_) {
+      if (initialized_drone_ids_.find(id) == initialized_drone_ids_.end()) {
+        // 新无人机：从已有估计中查找，或初始化为 (0,0,0)
+        try {
+          gtsam::Values current = isam2_.calculateEstimate();
+          if (current.exists(id)) {
+            new_initial.insert(id, current.at<gtsam::Pose2>(id));
+          } else {
+            new_initial.insert(id, gtsam::Pose2(0.0, 0.0, 0.0));
+          }
+        } catch (...) {
+          new_initial.insert(id, gtsam::Pose2(0.0, 0.0, 0.0));
+        }
+        initialized_drone_ids_.insert(id);
+      }
+    }
+
+    // 为当前滑窗平均后的每对测量添加 BetweenFactor
+    // iSAM2 会累积历史测量（不删除旧的），形成信息丰富的因子图
+    for (auto it = averaged.begin(); it != averaged.end(); ++it) {
       const AvgMeasurement& m = it->second;
+
+      // 确保两个端点都已初始化
+      if (initialized_drone_ids_.find(m.src) == initialized_drone_ids_.end()) {
+        new_initial.insert(m.src, gtsam::Pose2(0.0, 0.0, 0.0));
+        initialized_drone_ids_.insert(m.src);
+      }
+      if (initialized_drone_ids_.find(m.dst) == initialized_drone_ids_.end()) {
+        new_initial.insert(m.dst, gtsam::Pose2(0.0, 0.0, 0.0));
+        initialized_drone_ids_.insert(m.dst);
+      }
+
       double noise_scale = std::sqrt(std::max(m.avg_cov, 1e-4)) * 10.0;
       gtsam::SharedNoiseModel between_noise =
         gtsam::noiseModel::Diagonal::Sigmas(
           (gtsam::Vector(3) << noise_scale, noise_scale, noise_scale * 5.0).finished());
 
       gtsam::Pose2 rel_pose(m.dx, m.dy, m.yaw);
-
-      if (!initial.exists(m.src)) {
-        initial.insert(m.src, gtsam::Pose2(0.0, 0.0, 0.0));
-      }
-      if (!initial.exists(m.dst)) {
-        initial.insert(m.dst, gtsam::Pose2(0.0, 0.0, 0.0));
-      }
-
-      graph.add(gtsam::BetweenFactor<gtsam::Pose2>(m.src, m.dst, rel_pose, between_noise));
+      new_factors.add(gtsam::BetweenFactor<gtsam::Pose2>(m.src, m.dst, rel_pose, between_noise));
     }
 
-    // 优化
-    gtsam::LevenbergMarquardtParams params;
-    params.setMaxIterations(50);
-    params.setRelativeErrorTol(1e-5);
-
-    gtsam::Values result;
+    // ---- iSAM2 增量更新 ----
     try {
-      gtsam::LevenbergMarquardtOptimizer optimizer(graph, initial, params);
-      result = optimizer.optimize();
+      total_factors_added_ += new_factors.size();
+      gtsam::ISAM2Result result = isam2_.update(new_factors, new_initial);
+      ROS_DEBUG("[TreeGraphNode] iSAM2 update: %zu factors added, variables=%zu, "
+                "relinearized=%zu, total=%zu",
+                new_factors.size(),
+                isam2_.getLinearizationPoint().size(),
+                result.getVariablesRelinearized(),
+                total_factors_added_);
     } catch (const std::exception& e) {
-      ROS_WARN("[TreeGraphNode] Optimization failed: %s", e.what());
+      ROS_WARN("[TreeGraphNode] iSAM2 update failed: %s", e.what());
       return;
     }
 
-    // 发布优化后的两两位姿
-    for (std::map<uint32_t, AvgMeasurement>::iterator it = averaged.begin();
-         it != averaged.end(); ++it) {
-      const AvgMeasurement& m = it->second;
-      if (!result.exists(m.src) || !result.exists(m.dst)) continue;
+    // ---- 获取当前最优估计 ----
+    gtsam::Values result_estimate;
+    try {
+      result_estimate = isam2_.calculateEstimate();
+    } catch (const std::exception& e) {
+      ROS_WARN("[TreeGraphNode] Failed to calculate estimate: %s", e.what());
+      return;
+    }
 
-      gtsam::Pose2 pose_src = result.at<gtsam::Pose2>(m.src);
-      gtsam::Pose2 pose_dst = result.at<gtsam::Pose2>(m.dst);
+    // ---- 发布优化后的两两位姿 ----
+    for (auto it = averaged.begin(); it != averaged.end(); ++it) {
+      const AvgMeasurement& m = it->second;
+      if (!result_estimate.exists(m.src) || !result_estimate.exists(m.dst)) continue;
+
+      gtsam::Pose2 pose_src = result_estimate.at<gtsam::Pose2>(m.src);
+      gtsam::Pose2 pose_dst = result_estimate.at<gtsam::Pose2>(m.dst);
       gtsam::Pose2 rel_opt = pose_src.between(pose_dst);
 
       drone_detect_lidar::TreeRelativePoseOptimized opt_msg;
@@ -217,8 +251,8 @@ private:
       opt_pub_.publish(opt_msg);
     }
 
-    ROS_INFO("[TreeGraphNode] Optimized %zu pairs, %zu drones",
-             averaged.size(), known_drone_ids_.size());
+    ROS_INFO("[TreeGraphNode] iSAM2: %zu pairs published, %zu drones, %zu total factors",
+             averaged.size(), known_drone_ids_.size(), total_factors_added_);
   }
 
   void loadParameters() {
@@ -239,7 +273,13 @@ private:
   int min_common_trees_;
   int window_size_;
 
-  std::map<uint32_t, std::deque<drone_detect_lidar::TreeRelativePose::ConstPtr> > recent_measurements_;
+  // iSAM2 增量优化器（持久化，跨回调复用）
+  gtsam::ISAM2 isam2_;
+  bool graph_initialized_;
+  size_t total_factors_added_;
+  std::set<uint32_t> initialized_drone_ids_;
+
+  std::map<uint32_t, std::deque<drone_detect_lidar::TreeRelativePose::ConstPtr>> recent_measurements_;
   std::set<uint32_t> known_drone_ids_;
 };
 

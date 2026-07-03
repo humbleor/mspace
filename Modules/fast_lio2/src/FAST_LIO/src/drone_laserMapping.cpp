@@ -631,7 +631,7 @@ void voxelFilter(const PointCloudXYZI::Ptr& input, PointCloudXYZI::Ptr& output, 
     sor.filter(*output);
 }
 
-void publish_cloud_bizhangfun(const ros::Publisher &publish_cloud_bizhang) {
+void publish_cloud_bizhangfun(const ros::Publisher &pubLaserCloudFull) {
     PointCloudXYZI::Ptr current_frame_world(new PointCloudXYZI());
     current_frame_world->points.resize(feats_undistort->points.size());
     
@@ -667,7 +667,7 @@ void publish_cloud_bizhangfun(const ros::Publisher &publish_cloud_bizhang) {
     pcl::toROSMsg(*final_output, output_msg);
     output_msg.header.stamp = ros::Time().fromSec(lidar_end_time);
     output_msg.header.frame_id = "world";
-    publish_cloud_bizhang.publish(output_msg);
+    pubLaserCloudFull.publish(output_msg);
     publish_count -= PUBFRAME_PERIOD;
 }
 
@@ -1081,8 +1081,6 @@ int main(int argc, char **argv)
     ros::Subscriber sub_pcl = p_pre->lidar_type == AVIA ? nh.subscribe(lid_topic, 200000, livox_pcl_cbk) : nh.subscribe(lid_topic, 200000, standard_pcl_cbk);
     ros::Subscriber sub_imu = nh.subscribe(imu_topic, 200000, imu_cbk);
     ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered", 100000);
-    // ros::Publisher pubLaserCloudFull_zmax = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_zmax", 100000);
-    ros::Publisher publish_cloud_bizhang = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_bizhang", 100000);
     ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_registered_body", 100000);
     ros::Publisher pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>("/drone_cloud_effected", 100000);
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>("/drone_Laser_map", 100000);
@@ -1214,10 +1212,14 @@ int main(int argc, char **argv)
             if (path_en)
                 publish_path(pubPath);
             if (scan_pub_en || pcd_save_en)
-                publish_frame_world(pubLaserCloudFull);
+            {
+                if (p_pre->lidar_type == AVIA)
+                    publish_cloud_bizhangfun(pubLaserCloudFull);
+                else
+                    publish_frame_world(pubLaserCloudFull);
+            }
             if (scan_pub_en && scan_body_pub_en)
                 publish_frame_body(pubLaserCloudFull_body);
-            publish_cloud_bizhangfun(publish_cloud_bizhang);
             // publish_effect_world(pubLaserCloudEffect);
             // publish_map(pubLaserCloudMap);
 

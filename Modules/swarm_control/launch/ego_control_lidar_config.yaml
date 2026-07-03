@@ -38,3 +38,10 @@ track_gain:
     Ka_xy: 1.0
     Ka_z: 1.0
     tilt_angle_max : 10.0
+
+# 漂移补偿参数
+drift_correction:
+    enable: true           # 总开关，默认关闭（向后兼容）
+    ema_alpha: 0.5          # EMA 滤波系数，越小越平滑
+    outlier_threshold: 1.0  # 异常值阈值 (m)，单帧跳变超过此值则丢弃
+    max_age: 2.0            # 漂移量最大有效期 (s)，超过则重置为零

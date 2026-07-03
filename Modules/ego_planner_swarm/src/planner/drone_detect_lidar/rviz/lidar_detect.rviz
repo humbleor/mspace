@@ -5,6 +5,7 @@ Panels:
     Property Tree Widget:
       Expanded:
         - /UAV11
+        - /UAV21
         - /UAV31/Global List1
       Splitter Ratio: 0.6058823466300964
     Tree Height: 616
@@ -47,7 +48,7 @@ Visualization Manager:
       Reference Frame: <Fixed Frame>
       Show Trail: false
       Value: true
-    - Alpha: 0.5
+    - Alpha: 0.20000000298023224
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
         Max Value: 10
@@ -121,7 +122,7 @@ Visualization Manager:
           Color: 0; 170; 0
           Color Transformer: FlatColor
           Decay Time: 0
-          Enabled: true
+          Enabled: false
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
@@ -136,35 +137,35 @@ Visualization Manager:
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: true
+          Value: false
         - Alpha: 1
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
-            Max Value: 10
-            Min Value: -10
+            Max Value: 4.117731094360352
+            Min Value: 0.7661900520324707
             Value: true
           Axis: Z
           Channel Name: intensity
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
-          Color Transformer: Intensity
+          Color: 85; 170; 0
+          Color Transformer: FlatColor
           Decay Time: 0
-          Enabled: false
+          Enabled: true
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
-          Name: UAV1 Features
+          Name: UAV1 Tree
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
           Size (Pixels): 4
           Size (m): 0.10000000149011612
-          Style: Boxes
-          Topic: /uav1/feature_cloud_debug
+          Style: Points
+          Topic: /uav1/tree_cloud
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: false
+          Value: true
         - Angle Tolerance: 0.10000000149011612
           Class: rviz/Odometry
           Covariance:
@@ -283,7 +284,7 @@ Visualization Manager:
           Color: 0; 0; 255
           Color Transformer: FlatColor
           Decay Time: 0
-          Enabled: true
+          Enabled: false
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
@@ -298,7 +299,7 @@ Visualization Manager:
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: true
+          Value: false
         - Alpha: 1
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -308,25 +309,25 @@ Visualization Manager:
           Axis: Z
           Channel Name: intensity
           Class: rviz/PointCloud2
-          Color: 255; 255; 255
-          Color Transformer: Intensity
+          Color: 85; 85; 255
+          Color Transformer: FlatColor
           Decay Time: 0
-          Enabled: false
+          Enabled: true
           Invert Rainbow: true
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
-          Name: UAV2 Features
+          Name: UAV2 Tree
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
-          Size (Pixels): 3
+          Size (Pixels): 4
           Size (m): 0.10000000149011612
-          Style: Boxes
-          Topic: /uav2/feature_cloud_debug
+          Style: Points
+          Topic: /uav2/tree_cloud
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: false
+          Value: true
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
@@ -418,7 +419,7 @@ Visualization Manager:
           Color: 0; 0; 255
           Color Transformer: FlatColor
           Decay Time: 0
-          Enabled: true
+          Enabled: false
           Invert Rainbow: false
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
@@ -433,7 +434,7 @@ Visualization Manager:
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: true
+          Value: false
         - Alpha: 1
           Autocompute Intensity Bounds: true
           Autocompute Value Bounds:
@@ -446,22 +447,22 @@ Visualization Manager:
           Color: 255; 255; 255
           Color Transformer: Intensity
           Decay Time: 0
-          Enabled: false
+          Enabled: true
           Invert Rainbow: true
           Max Color: 255; 255; 255
           Min Color: 0; 0; 0
-          Name: UAV3 Features
+          Name: UAV3 Tree
           Position Transformer: XYZ
           Queue Size: 10
           Selectable: true
           Size (Pixels): 3
           Size (m): 0.10000000149011612
           Style: Boxes
-          Topic: /uav2/feature_cloud_debug
+          Topic: /uav3/tree_cloud
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
-          Value: false
+          Value: true
         - Alpha: 1
           Buffer Length: 1
           Class: rviz/Path
@@ -499,7 +500,7 @@ Visualization Manager:
           Marker Topic: /uav_1_ego_planner_node/global_list
           Name: Global List
           Namespaces:
-            {}
+            "": true
           Queue Size: 100
           Value: true
       Enabled: true
@@ -527,7 +528,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 35.52524948120117
+      Distance: 23.888317108154297
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -535,17 +536,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 8.522485733032227
-        Y: 1.9898440837860107
-        Z: 2.326239585876465
+        X: 8.556327819824219
+        Y: -0.2760550081729889
+        Z: 1.8091148138046265
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9197970628738403
+      Pitch: 0.9897967576980591
       Target Frame: world
-      Yaw: 3.1631710529327393
+      Yaw: 3.1531715393066406
     Saved: ~
 Window Geometry:
   Displays:
@@ -557,5 +558,5 @@ Window Geometry:
   Views:
     collapsed: false
   Width: 2548
-  X: -32
-  Y: -32
+  X: 0
+  Y: 0

@@ -40,7 +40,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(multi_map_server)
 
 set(CMAKE_BUILD_TYPE "Release")
-set(CMAKE_CXX_FLAGS "-std=c++11")
+set(CMAKE_CXX_FLAGS "-std=c++14")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3 -Wall -g")
 
 ## Find catkin macros and libraries
@@ -58,6 +58,8 @@ find_package(catkin REQUIRED COMPONENTS
   laser_geometry
   pose_utils
   quadrotor_msgs
+  pcl_ros
+  pcl_conversions
 )
 
 ## System dependencies are found with CMake's conventions
@@ -164,7 +166,7 @@ add_executable(multi_map_visualization src/multi_map_visualization.cc)
 
 ## Add cmake target dependencies of the executable/library
 ## as an example, message headers may need to be generated before nodes
-add_dependencies(multi_map_visualization multi_map_server_messages_cpp)
+add_dependencies(multi_map_visualization multi_map_server_generate_messages_cpp)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(multi_map_visualization 

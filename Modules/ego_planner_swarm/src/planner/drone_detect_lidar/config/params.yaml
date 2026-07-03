@@ -17,12 +17,21 @@ tree_cluster_tolerance: 0.3     # 聚类最大间距 (m)
 tree_min_cluster_size: 20       # 最小聚类点数
 tree_max_cluster_size: 5000     # 最大聚类点数
 
-# PCA 线性度阈值 (越高越像树干)
-tree_linearity_threshold: 0.6
+# PCA 线性度/平面度/圆度阈值
+tree_linearity_threshold: 0.8   # (λ₂ - λ₁) / λ₂，越高越像树干
+tree_planarity_threshold: 0.3   # (λ₁ - λ₀) / λ₂，排除扁平物体
+tree_min_height_spread: 0.5     # 最小高度延伸 (m)，排除矮灌木
+tree_min_roundness: 0.4         # 横截面圆度，排除不规则形状
 
-# ============================================================================
-# 三角形匹配参数 (HashReg 风格)
-# ============================================================================
+patchwork_sensor_height: 1.0    # 传感器离地高度 (m)
+patchwork_max_range: 10.0       # 最大探测距离 (m)
+patchwork_min_range: 0.5        # 最小探测距离 (m)
+
+accumulation_frame_count: 5     # 积累 N 帧点云后再检测（0 = 逐帧检测）
+
+# ===================================================================
+# 三角形匹配参数
+# ===================================================================
 
 # 三角形边长范围 (m)，低于最小值或高于最大值不参与匹配
 triangle_min_side: 0.3
@@ -51,7 +60,7 @@ min_common_trees: 3
 drone_dist_threshold: 10.0
 
 # 质量检查上限（仿真中 odometry 完美，这些值应远小于阈值）
-max_translation: 3.0            # 最大平移 (m)
+max_translation: 5.0            # 最大平移 (m)
 max_yaw_deg: 20.0               # 最大 yaw (度)
 max_match_residual: 0.5         # 匹配 RMS 残差 (m)
 

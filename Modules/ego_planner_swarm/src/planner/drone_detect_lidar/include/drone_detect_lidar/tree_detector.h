@@ -6,6 +6,8 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <Eigen/Eigen>
+#include <memory>
+#include "drone_detect_lidar/patchworkpp.h"
 
 namespace drone_detect_lidar {
 
@@ -13,7 +15,7 @@ struct TreeInfo {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   uint32_t id;
-  double x, y;           // 树干与地面交点 (world frame)
+  double x, y;           // 树干底部位置 (world frame XY)
   double z_base;         // 地面高度 (Z)
   double height;         // 树高 (m)
   double diameter;       // 树干直径 (m)
@@ -39,12 +41,19 @@ struct TreeDetectorConfig {
   double tree_min_height_spread;   // 最小高度延伸 (m)，排除矮灌木
   double tree_min_roundness;       // 横截面圆度阈值
 
+  // PatchWork++ 地面剔除参数
+  double patchwork_sensor_height; // 传感器离地高度 (m)
+  double patchwork_max_range;     // PatchWork++ 最大探测距离 (m)
+  double patchwork_min_range;     // PatchWork++ 最小探测距离 (m)
+
   TreeDetectorConfig()
     : tree_height_min(0.3), tree_height_max(3.0),
       tree_voxel_size(0.15), tree_cluster_tolerance(0.3),
       tree_min_cluster_size(20), tree_max_cluster_size(5000),
       tree_linearity_threshold(0.6), tree_planarity_threshold(0.3),
-      tree_min_height_spread(0.5), tree_min_roundness(0.4) {}
+      tree_min_height_spread(0.5), tree_min_roundness(0.4),
+      patchwork_sensor_height(1.0), patchwork_max_range(80.0),
+      patchwork_min_range(0.5) {}
 };
 
 /**
@@ -53,10 +62,10 @@ struct TreeDetectorConfig {
  * 流程:
  * 1. 体素降采样
  * 2. Z 轴高度裁剪（去除地面和树冠）
- * 3. RANSAC 地面平面移除（保留平面方程）
+ * 3. PatchWork++ 地面剔除（处理起伏地形）
  * 4. 欧氏聚类
  * 5. 连续性/几何约束筛选：线性度 + 平面度 + 高度延伸 + 横截面圆度
- * 6. 树干参数估计：地面交点位置 + 高度 + 直径
+ * 6. 树干参数估计：底部位置 + 高度 + 直径
  */
 class TreeDetector {
 public:
@@ -85,20 +94,14 @@ private:
   double last_processing_time_;
   int last_tree_count_;
 
-  // 地面平面方程: ax + by + cz + d = 0
-  Eigen::Vector4d ground_plane_;  // [a, b, c, d]
-  bool has_ground_plane_;
+  // PatchWork++ ground segmentation
+  std::unique_ptr<patchwork::PatchWorkpp> patchworkpp_;
+  patchwork::Params patchwork_params_;
 
   PointCloudPtr heightCrop(const PointCloudPtr& cloud);
-  PointCloudPtr removeGround(const PointCloudPtr& cloud);
+  PointCloudPtr removeGroundPatchWork(const PointCloudPtr& cloud);
   std::vector<PointCloudPtr> clusterPoints(const PointCloudPtr& cloud);
   bool computeTreeParameters(const PointCloudPtr& cluster, TreeInfo& tree);
-
-  // 计算树干主成分轴与地面的交点
-  Eigen::Vector3d computeGroundIntersection(
-    const PointCloudPtr& cluster,
-    const Eigen::Vector3d& centroid,
-    const Eigen::Vector3d& principal_dir);
 };
 
 } // namespace drone_detect_lidar

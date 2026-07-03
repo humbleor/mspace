@@ -1,7 +1,6 @@
 #include "drone_detect_lidar/tree_detector.h"
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/filters/extract_indices.h>
-#include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/conversions.h>
@@ -13,8 +12,15 @@
 namespace drone_detect_lidar {
 
 TreeDetector::TreeDetector(const TreeDetectorConfig& config)
-  : config_(config), last_processing_time_(0), last_tree_count_(0),
-    has_ground_plane_(false) {
+  : config_(config), last_processing_time_(0), last_tree_count_(0) {
+
+  // Initialize PatchWork++ parameters
+  patchwork_params_.sensor_height = config_.patchwork_sensor_height;
+  patchwork_params_.max_range = config_.patchwork_max_range;
+  patchwork_params_.min_range = config_.patchwork_min_range;
+  patchwork_params_.verbose = false;
+
+  patchworkpp_ = std::make_unique<patchwork::PatchWorkpp>(patchwork_params_);
 }
 
 TreeDetector::~TreeDetector() {}
@@ -26,7 +32,6 @@ void TreeDetector::setConfig(const TreeDetectorConfig& config) {
 bool TreeDetector::detect(const PointCloudPtr& cloud_in, std::vector<TreeInfo>& trees_out) {
   ros::WallTime start = ros::WallTime::now();
   trees_out.clear();
-  has_ground_plane_ = false;
 
   if (!cloud_in || cloud_in->empty()) {
     ROS_WARN("[TreeDetector] Empty input cloud");
@@ -48,8 +53,8 @@ bool TreeDetector::detect(const PointCloudPtr& cloud_in, std::vector<TreeInfo>& 
     return false;
   }
 
-  // 步骤3: 地面平面移除（保留地面平面方程用于后续交点计算）
-  PointCloudPtr no_ground = removeGround(cropped);
+  // 步骤3: PatchWork++ 地面剔除
+  PointCloudPtr no_ground = removeGroundPatchWork(cropped);
   if (no_ground->size() < static_cast<size_t>(config_.tree_min_cluster_size)) {
     ROS_WARN_THROTTLE(2.0, "[TreeDetector] Too few points after ground removal: %zu", no_ground->size());
     last_processing_time_ = (ros::WallTime::now() - start).toSec();
@@ -112,40 +117,20 @@ TreeDetector::PointCloudPtr TreeDetector::heightCrop(const PointCloudPtr& cloud)
   return out;
 }
 
-// RANSAC 平面拟合移除地面，保留平面方程
-TreeDetector::PointCloudPtr TreeDetector::removeGround(const PointCloudPtr& cloud) {
-  pcl::SACSegmentation<PointT> seg;
-  pcl::PointIndices::Ptr inliers(new pcl::PointIndices);
-  pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients);
+// PatchWork++ 地面剔除
+TreeDetector::PointCloudPtr TreeDetector::removeGroundPatchWork(const PointCloudPtr& cloud) {
+  patchworkpp_->estimateGround<PointT>(cloud);
 
-  seg.setOptimizeCoefficients(true);
-  seg.setModelType(pcl::SACMODEL_PLANE);
-  seg.setMethodType(pcl::SAC_RANSAC);
-  seg.setMaxIterations(50);
-  seg.setDistanceThreshold(0.15);
-  seg.setInputCloud(cloud);
-  seg.segment(*inliers, *coefficients);
+  // Extract non-ground points
+  Eigen::MatrixX3f nonground = patchworkpp_->getNonground();
 
   PointCloudPtr out(new PointCloudT());
-  if (inliers->indices.empty() || coefficients->values.size() < 4) {
-    *out = *cloud;
-    has_ground_plane_ = false;
-    return out;
+  out->resize(nonground.rows());
+  for (int i = 0; i < nonground.rows(); i++) {
+    out->points[i].x = nonground(i, 0);
+    out->points[i].y = nonground(i, 1);
+    out->points[i].z = nonground(i, 2);
   }
-
-  // 保存地面平面方程: ax + by + cz + d = 0
-  ground_plane_[0] = coefficients->values[0];
-  ground_plane_[1] = coefficients->values[1];
-  ground_plane_[2] = coefficients->values[2];
-  ground_plane_[3] = coefficients->values[3];
-  has_ground_plane_ = true;
-
-  // 提取非地面点
-  pcl::ExtractIndices<PointT> extract;
-  extract.setInputCloud(cloud);
-  extract.setIndices(inliers);
-  extract.setNegative(true);
-  extract.filter(*out);
 
   return out;
 }
@@ -176,36 +161,6 @@ std::vector<TreeDetector::PointCloudPtr> TreeDetector::clusterPoints(const Point
   }
 
   return clusters;
-}
-
-// 计算树干主成分轴与地面的交点
-Eigen::Vector3d TreeDetector::computeGroundIntersection(
-    const PointCloudPtr& cluster,
-    const Eigen::Vector3d& centroid,
-    const Eigen::Vector3d& principal_dir) {
-
-  // 如果地面平面已知，计算主成分轴与地面的交点
-  if (has_ground_plane_) {
-    double a = ground_plane_[0], b = ground_plane_[1];
-    double c = ground_plane_[2], d = ground_plane_[3];
-
-    // 射线: P = centroid - t * principal_dir（向下搜索）
-    // 平面: a*x + b*y + c*z + d = 0
-    // 解: t = -(a*cx + b*cy + c*cz + d) / (a*px + b*py + c*pz)
-    double denom = a * principal_dir[0] + b * principal_dir[1] + c * principal_dir[2];
-    if (std::abs(denom) > 1e-6) {
-      double num = -(a * centroid[0] + b * centroid[1] + c * centroid[2] + d);
-      double t = num / denom;
-      return centroid - t * principal_dir;
-    }
-  }
-
-  // 回退：用最低 Z 点
-  double z_min = cluster->points[0].z;
-  for (const auto& pt : cluster->points) {
-    if (pt.z < z_min) z_min = pt.z;
-  }
-  return Eigen::Vector3d(centroid[0], centroid[1], z_min);
 }
 
 // 对单个聚类计算树干参数（多条件筛选）
@@ -251,19 +206,17 @@ bool TreeDetector::computeTreeParameters(const PointCloudPtr& cluster, TreeInfo&
   tree.height = z_max - z_min;
   if (tree.height < config_.tree_min_height_spread) return false;
 
-  // 树干位置: 主成分轴与地面的交点（而非质心）
-  Eigen::Vector3d ground_point = computeGroundIntersection(
-    cluster, Eigen::Vector3d(centroid[0], centroid[1], centroid[2]), principal_dir);
-  tree.x = ground_point[0];
-  tree.y = ground_point[1];
-  tree.z_base = ground_point[2];
+  // 树干位置: 使用质心 XY + 最低 Z（PatchWork++ 不提供全局地面方程）
+  tree.x = centroid[0];
+  tree.y = centroid[1];
+  tree.z_base = z_min;
 
   // 直径: 在垂直于主成分轴的平面上计算截面圆度
   // 投影到 XY 平面计算（近似，适用于近似垂直的树干）
   double avg_radius = 0, radius_var = 0;
   for (const auto& pt : *cluster) {
-    double dx = pt.x - ground_point[0];
-    double dy = pt.y - ground_point[1];
+    double dx = pt.x - tree.x;
+    double dy = pt.y - tree.y;
     double r = std::sqrt(dx * dx + dy * dy);
     avg_radius += r;
   }
@@ -271,8 +224,8 @@ bool TreeDetector::computeTreeParameters(const PointCloudPtr& cluster, TreeInfo&
 
   // 计算半径方差用于圆度评估
   for (const auto& pt : *cluster) {
-    double dx = pt.x - ground_point[0];
-    double dy = pt.y - ground_point[1];
+    double dx = pt.x - tree.x;
+    double dy = pt.y - tree.y;
     double r = std::sqrt(dx * dx + dy * dy);
     radius_var += (r - avg_radius) * (r - avg_radius);
   }

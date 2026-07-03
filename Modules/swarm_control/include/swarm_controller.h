@@ -13,6 +13,7 @@
 #include <prometheus_msgs/DroneState.h>
 #include <nav_msgs/Odometry.h>
 #include <quadrotor_msgs/PositionCommand.h>
+#include <geometry_msgs/Vector3.h>
 
 #include "formation_utils.h"
 #include "message_utils.h"
@@ -58,6 +59,9 @@ ros::Subscriber drone_state_sub;
 ros::Subscriber position_target_sub;
 ros::Subscriber nei_state_sub[MAX_UAV_NUM+1];
 
+// 漂移补偿订阅
+ros::Subscriber tree_drift_sub[MAX_UAV_NUM+1];
+
 // 发布
 ros::Publisher setpoint_raw_local_pub;
 ros::Publisher setpoint_raw_attitude_pub;
@@ -76,6 +80,15 @@ Eigen::Vector3d vel_nei[MAX_UAV_NUM+1];                     // 邻居速度
 Eigen::Vector3d dv;
 float R = 4.0;
 float r = 0.5;
+
+// 漂移补偿
+Eigen::Vector3d drift_nei[MAX_UAV_NUM+1];                   // EMA 滤波后的漂移量 (dx, dy, yaw)
+Eigen::Vector3d drift_raw_nei[MAX_UAV_NUM+1];               // 原始漂移量（用于异常值检测）
+ros::Time drift_timestamp[MAX_UAV_NUM+1];                   // 漂移量时间戳
+bool enable_drift_correction;                               // 总开关
+double ema_alpha;                                           // EMA 滤波系数
+double outlier_threshold;                                   // 异常值阈值 (m)
+double drift_max_age;                                       // 漂移量最大有效期 (s)
 
 // 无人机状态量
 Eigen::Vector3d pos_drone;                      // 无人机位置
@@ -200,6 +213,12 @@ void init(ros::NodeHandle &nh)
     nh.param<float>("k_aij", k_aij, 0.2f);
     nh.param<float>("k_gamma", k_gamma, 1.2f);
 
+    // 漂移补偿参数
+    nh.param<bool>("drift_correction/enable", enable_drift_correction, false);
+    nh.param<double>("drift_correction/ema_alpha", ema_alpha, 0.5);
+    nh.param<double>("drift_correction/outlier_threshold", outlier_threshold, 1.0);
+    nh.param<double>("drift_correction/max_age", drift_max_age, 2.0);
+
     msg_name = uav_name + "/control";
     // 初始化命令
     Command_Now.Mode                = prometheus_msgs::SwarmCommand::Idle;
@@ -216,6 +235,13 @@ void init(ros::NodeHandle &nh)
     int_e_v.setZero();
     u_att.setZero();
     g_ << 0.0, 0.0, 9.8;
+
+    // 初始化漂移补偿
+    for (int i = 0; i <= MAX_UAV_NUM; i++) {
+        drift_nei[i].setZero();
+        drift_raw_nei[i].setZero();
+        drift_timestamp[i] = ros::Time(0);
+    }
 }
 
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>回调函数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -284,12 +310,73 @@ void drone_state_cb(const prometheus_msgs::DroneState::ConstPtr& msg)
     yaw_drone = uav_utils::get_yaw_from_quaternion(q_drone);
 }
 
+// 漂移修正前置声明
+void drift_correct_pos_nei(int nei_id);
+
 void nei_state_cb(const prometheus_msgs::DroneState::ConstPtr& msg, int nei_id)
 {
     state_nei[nei_id] = *msg;
 
     pos_nei[nei_id]  = Eigen::Vector3d(msg->position[0], msg->position[1], msg->position[2]);
     vel_nei[nei_id]  = Eigen::Vector3d(msg->velocity[0], msg->velocity[1], msg->velocity[2]);
+
+    // 应用漂移修正
+    drift_correct_pos_nei(nei_id);
+}
+
+void tree_drift_cb(const geometry_msgs::Vector3::ConstPtr& msg, int nei_id)
+{
+    if (!enable_drift_correction) return;
+
+    Eigen::Vector3d new_drift(msg->x, msg->y, msg->z);
+
+    // 异常值检查：新测量与上一帧原始值偏差过大则丢弃
+    double diff = (new_drift - drift_raw_nei[nei_id]).norm();
+    if (drift_timestamp[nei_id].toSec() > 0 && diff > outlier_threshold) {
+        ROS_WARN_THROTTLE(2.0, "[SwarmController] Drift outlier rejected: diff=%.3f m (nei%d)", diff, nei_id);
+        return;
+    }
+
+    // 更新原始值
+    drift_raw_nei[nei_id] = new_drift;
+
+    // EMA 滤波
+    drift_nei[nei_id] = ema_alpha * new_drift + (1.0 - ema_alpha) * drift_nei[nei_id];
+
+    // 更新时间戳
+    drift_timestamp[nei_id] = ros::Time::now();
+}
+
+void drift_correct_pos_nei(int nei_id)
+{
+    if (!enable_drift_correction) return;
+
+    // 过期检查
+    if (drift_timestamp[nei_id].toSec() > 0 &&
+        (ros::Time::now() - drift_timestamp[nei_id]).toSec() > drift_max_age) {
+        ROS_WARN_THROTTLE(5.0, "[SwarmController] Drift data stale for nei%d, resetting", nei_id);
+        drift_nei[nei_id].setZero();
+        drift_raw_nei[nei_id].setZero();
+        drift_timestamp[nei_id] = ros::Time(0);
+        return;
+    }
+
+    // 漂移量为零时不需要修正
+    if (drift_nei[nei_id].norm() < 1e-6) return;
+
+    double dx  = drift_nei[nei_id](0);
+    double dy  = drift_nei[nei_id](1);
+    double yaw = drift_nei[nei_id](2);
+
+    double nx = pos_nei[nei_id].x();
+    double ny = pos_nei[nei_id].y();
+
+    // 2D 刚体变换修正: pos_corrected = R(-yaw) · (pos - t)
+    double c = cos(yaw);
+    double s = sin(yaw);
+    pos_nei[nei_id].x() =  c * (nx - dx) + s * (ny - dy);
+    pos_nei[nei_id].y() = -s * (nx - dx) + c * (ny - dy);
+    // Z 不修正
 }
 
 int check_failsafe()
@@ -659,6 +746,12 @@ void debug_cb(const ros::TimerEvent &e)
 
         cout << GREEN  << "nei" <<i<< "_pos [X Y Z] : " << pos_nei[i][0] << " [ m ] "<< pos_nei[i][1]<<" [ m ] "<<pos_nei[i][2]<<" [ m ] "<< TAIL <<endl;
         cout << GREEN  << "nei" <<i<< "_vel [X Y Z] : " << vel_nei[i][0] << " [ m/s ] "<< vel_nei[i][1]<<" [ m/s ] "<<vel_nei[i][2]<<" [ m/s ] "<< TAIL <<endl;
+
+        if(enable_drift_correction)
+        {
+            double age = drift_timestamp[i].toSec() > 0 ? (ros::Time::now() - drift_timestamp[i]).toSec() : -1.0;
+            cout << GREEN  << "drift" <<i<< " [dx dy yaw] : " << drift_nei[i][0] << " [ m ] "<< drift_nei[i][1]<<" [ m ] "<<drift_nei[i][2]<<" [ rad ] age="<<age<<"s"<< TAIL <<endl;
+        }
     }
 
     if(controller_flag == 0)
@@ -694,5 +787,11 @@ void printf_param()
     cout << "geo_fence_x : "<< geo_fence_x[0] << " [m]  to  "<<geo_fence_x[1] << " [m]"<< endl;
     cout << "geo_fence_y : "<< geo_fence_y[0] << " [m]  to  "<<geo_fence_y[1] << " [m]"<< endl;
     cout << "geo_fence_z : "<< geo_fence_z[0] << " [m]  to  "<<geo_fence_z[1] << " [m]"<< endl;
+
+    cout << "drift_correction:" << endl;
+    cout << "  enable             : " << (enable_drift_correction ? "true" : "false") << endl;
+    cout << "  ema_alpha          : " << ema_alpha << endl;
+    cout << "  outlier_threshold  : " << outlier_threshold << " [m]" << endl;
+    cout << "  max_age            : " << drift_max_age << " [s]" << endl;
 }
 #endif

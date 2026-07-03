@@ -1,14 +1,20 @@
 #include <ros/ros.h>
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/PoseStamped.h>
-#include <sensor_msgs/PointCloud.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
 #include "drone_detect_lidar/TreeDetection.h"
 #include "drone_detect_lidar/TreeRelativePose.h"
+#include "drone_detect_lidar/triangle_matcher.h"
 
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/kdtree/kdtree_flann.h>
 #include <Eigen/Eigen>
 #include <cmath>
 #include <unordered_map>
+#include <mutex>
 
 /**
  * @brief 基于三角形哈希匹配的多机相对定位节点
@@ -16,9 +22,9 @@
  * 流程 (参考 HashReg):
  *   第0步: 距离过滤 — 两机间距超过阈值则跳过
  *   第1步: 收集自身 + 邻居 TreeDetection
- *   第2步: 三角形哈希匹配 + 投票验证 — 替代距离贪心匹配
+ *   第2步: 三角形哈希匹配 + 投票验证
  *     2a: 构造非退化三角形 (三边长排序 + 等腰/等边剔除)
- *     2b: 自身三角形建哈希表，邻居三角形粗糙匹配 (27 voxel 搜索)
+ *     2b: 自身三角形建哈希表，邻居三角形粗糙匹配 (11^3 voxel 搜索)
  *     2c: 投票验证 — 每个候选对求变换，选一致性最好的
  *     2d: 用最佳变换收集所有对应关系
  *   第3步: 数量检查 — 最少共有树数量
@@ -27,28 +33,11 @@
  *   第6步: 发布 tree_pose_error
  */
 
-struct Triangle2D {
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  Eigen::Vector2d A, B, C;
-  Eigen::Vector2d center;
-  double a, b, c;  // sorted: a <= b <= c
-  int idx[3];
-};
-
-struct TriMatch {
-  int self_idx;
-  int neighbor_idx;
-};
-
-using TriKey = std::tuple<int, int, int>;
-
-struct TriKeyHash {
-  size_t operator()(const TriKey& k) const {
-    return (size_t)((std::get<0>(k) * 73856093) ^
-                    (std::get<1>(k) * 19349663) ^
-                    (std::get<2>(k) * 83492791));
-  }
-};
+using drone_detect_lidar::Triangle2D;
+using drone_detect_lidar::TriMatch;
+using drone_detect_lidar::TriKey;
+using drone_detect_lidar::TriKeyHash;
+using drone_detect_lidar::TriangleMatchConfig;
 
 class TreeLocNode {
 public:
@@ -70,7 +59,7 @@ public:
     tree_pose_error_pub_ = nh_.advertise<geometry_msgs::Vector3>("tree_pose_error", 10);
     tree_relative_pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("tree_relative_pose", 10);
     tree_relative_pose_msg_pub_ = nh_.advertise<drone_detect_lidar::TreeRelativePose>("tree_relative_pose_msg", 10);
-    matched_tree_pairs_pub_ = nh_.advertise<sensor_msgs::PointCloud>("matched_tree_pairs", 10);
+    matched_tree_pairs_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("matched_tree_pairs", 10);
 
     compute_timer_ = nh_.createTimer(ros::Duration(1.0 / compute_frequency_),
                                      &TreeLocNode::computeTimerCallback, this);
@@ -99,13 +88,9 @@ private:
   double max_match_residual_;
 
   // Triangle matching parameters (HashReg style)
-  double triangle_min_side_;
-  double triangle_max_side_;
-  double isosceles_threshold_;
-  double equilateral_threshold_;
-  double rough_dis_ratio_;
-  double geom_verify_dist_;
+  TriangleMatchConfig tri_config_;
 
+  std::mutex data_mutex_;
   bool has_self_trees_, has_neighbor_trees_;
   bool has_self_odom_, has_neighbor_odom_;
   drone_detect_lidar::TreeDetection::ConstPtr self_trees_;
@@ -117,36 +102,40 @@ private:
   void loadParameters() {
     nh_.param("drone_id", drone_id_, 0);
     nh_.param("compute_frequency", compute_frequency_, 5.0);
-    nh_.param("drone_dist_threshold", drone_dist_threshold_, 15.0);
+    nh_.param("drone_dist_threshold", drone_dist_threshold_, 10.0);
     nh_.param("min_common_trees", min_common_trees_, 3);
     nh_.param("max_translation", max_translation_, 3.0);
     nh_.param("max_yaw_deg", max_yaw_deg_, 20.0);
     nh_.param("max_match_residual", max_match_residual_, 0.5);
 
-    nh_.param("triangle_min_side", triangle_min_side_, 0.3);
-    nh_.param("triangle_max_side", triangle_max_side_, 20.0);
-    nh_.param("isosceles_threshold", isosceles_threshold_, 0.1);
-    nh_.param("equilateral_threshold", equilateral_threshold_, 0.15);
-    nh_.param("rough_dis_ratio", rough_dis_ratio_, 0.05);
-    nh_.param("geom_verify_dist", geom_verify_dist_, 0.3);
+    nh_.param("triangle_min_side", tri_config_.triangle_min_side, tri_config_.triangle_min_side);
+    nh_.param("triangle_max_side", tri_config_.triangle_max_side, tri_config_.triangle_max_side);
+    nh_.param("isosceles_threshold", tri_config_.isosceles_threshold, tri_config_.isosceles_threshold);
+    nh_.param("equilateral_threshold", tri_config_.equilateral_threshold, tri_config_.equilateral_threshold);
+    nh_.param("rough_dis_ratio", tri_config_.rough_dis_ratio, tri_config_.rough_dis_ratio);
+    nh_.param("geom_verify_dist", tri_config_.geom_verify_dist, tri_config_.geom_verify_dist);
   }
 
   void selfTreeCallback(const drone_detect_lidar::TreeDetection::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
     self_trees_ = msg;
     has_self_trees_ = true;
   }
 
   void neighborTreeCallback(const drone_detect_lidar::TreeDetection::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
     neighbor_trees_ = msg;
     has_neighbor_trees_ = true;
   }
 
   void selfOdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
     self_odom_ = msg;
     has_self_odom_ = true;
   }
 
   void neighborOdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
+    std::lock_guard<std::mutex> lock(data_mutex_);
     neighbor_odom_ = msg;
     has_neighbor_odom_ = true;
   }
@@ -158,36 +147,37 @@ private:
     size_t N = trees.size();
     if (N < 3) return tris;
 
-    // Build KDTree for KNN
-    std::vector<Eigen::Vector2d> pts(N);
+    // Build PCL KDTree for efficient KNN
+    pcl::PointCloud<pcl::PointXYZ>::Ptr cloud(new pcl::PointCloud<pcl::PointXYZ>);
+    cloud->points.resize(N);
     for (size_t i = 0; i < N; i++) {
-      pts[i] << trees[i].x, trees[i].y;
+      cloud->points[i].x = trees[i].x;
+      cloud->points[i].y = trees[i].y;
+      cloud->points[i].z = 0.0;
     }
+    pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
+    kdtree.setInputCloud(cloud);
 
     const int K = std::min((int)N, 10);
 
+    std::set<std::tuple<int,int,int>> seen;
+
     for (size_t i = 0; i < N; i++) {
-      // Find K nearest neighbors
-      std::vector<std::pair<double, int>> dists;
-      for (size_t j = 0; j < N; j++) {
-        if (i == j) continue;
-        double d = (pts[i] - pts[j]).norm();
-        dists.push_back({d, (int)j});
-      }
-      std::sort(dists.begin(), dists.end());
-      if ((int)dists.size() < 2) continue;
+      // Find K nearest neighbors via KDTree
+      std::vector<int> nn_indices(K);
+      std::vector<float> nn_sqr_dists(K);
+      int found = kdtree.nearestKSearch(cloud->points[i], K, nn_indices, nn_sqr_dists);
+      if (found < 3) continue;
 
-      int nn = std::min(K - 1, (int)dists.size());
+      // Form triangles with pairs of neighbors (skip index 0 = self)
+      for (int m = 1; m < found - 1; m++) {
+        for (int n_idx = m + 1; n_idx < found; n_idx++) {
+          int j = nn_indices[m];
+          int k = nn_indices[n_idx];
 
-      // Form triangles with pairs of neighbors
-      for (int m = 0; m < nn - 1; m++) {
-        for (int n_idx = m + 1; n_idx < nn; n_idx++) {
-          int j = dists[m].second;
-          int k = dists[n_idx].second;
-
-          Eigen::Vector2d A = pts[i];
-          Eigen::Vector2d B = pts[j];
-          Eigen::Vector2d C = pts[k];
+          Eigen::Vector2d A = Eigen::Vector2d(trees[i].x, trees[i].y);
+          Eigen::Vector2d B = Eigen::Vector2d(trees[j].x, trees[j].y);
+          Eigen::Vector2d C = Eigen::Vector2d(trees[k].x, trees[k].y);
 
           // Side lengths
           double d_ab = (A - B).norm();
@@ -196,8 +186,6 @@ private:
 
           // Sort: a <= b <= c
           double sides[3] = {d_ab, d_ac, d_bc};
-
-          // Simple sort (only sides needed, vertices always {i,j,k})
           if (sides[0] > sides[1]) std::swap(sides[0], sides[1]);
           if (sides[1] > sides[2]) std::swap(sides[1], sides[2]);
           if (sides[0] > sides[1]) std::swap(sides[0], sides[1]);
@@ -205,24 +193,28 @@ private:
           double a = sides[0], b = sides[1], c = sides[2];
 
           // Filter: side length range
-          if (a < triangle_min_side_ || c > triangle_max_side_) continue;
+          if (a < tri_config_.triangle_min_side || c > tri_config_.triangle_max_side) continue;
 
           // Filter: isosceles / equilateral (HashReg style)
-          if (std::abs(a - b) < isosceles_threshold_) continue;
-          if (std::abs(b - c) < isosceles_threshold_) continue;
-          if (std::abs(a - c) < equilateral_threshold_) continue;
+          if (std::abs(a - b) < tri_config_.isosceles_threshold) continue;
+          if (std::abs(b - c) < tri_config_.isosceles_threshold) continue;
+          if (std::abs(a - c) < tri_config_.equilateral_threshold) continue;
 
-          // Determine vertices A, B, C corresponding to sides a, b, c
-          // After sorting, we need to find which original vertices form the triangle
-          // The three vertices are always {i, j, k}
+          // Deduplicate
+          int idx[3] = {static_cast<int>(i), j, k};
+          std::sort(idx, idx + 3);
+          auto key = std::make_tuple(idx[0], idx[1], idx[2]);
+          if (seen.count(key)) continue;
+          seen.insert(key);
+
           Triangle2D tri;
-          tri.A = pts[i];
-          tri.B = pts[j];
-          tri.C = pts[k];
+          tri.A = A;
+          tri.B = B;
+          tri.C = C;
           tri.a = a;
           tri.b = b;
           tri.c = c;
-          tri.center = (tri.A + tri.B + tri.C) / 3.0;
+          tri.center = (A + B + C) / 3.0;
           tri.idx[0] = i;
           tri.idx[1] = j;
           tri.idx[2] = k;
@@ -232,20 +224,7 @@ private:
       }
     }
 
-    // Deduplicate: remove duplicate triangles (same 3 indices)
-    std::vector<Triangle2D, Eigen::aligned_allocator<Triangle2D>> unique_tris;
-    std::set<std::tuple<int,int,int>> seen;
-    for (auto& tri : tris) {
-      int idx[3] = {tri.idx[0], tri.idx[1], tri.idx[2]};
-      std::sort(idx, idx+3);
-      auto key = std::make_tuple(idx[0], idx[1], idx[2]);
-      if (seen.find(key) == seen.end()) {
-        seen.insert(key);
-        unique_tris.push_back(tri);
-      }
-    }
-
-    return unique_tris;
+    return tris;
   }
 
   // ===== Triangle solver (HashReg triangle_solver, 2D version) =====
@@ -274,12 +253,18 @@ private:
     return {t, R};
   }
 
-  // ===== 27 voxel round vectors =====
+  // ===== Voxel search round vectors =====
+  // Search ±voxel_radius bins in each dimension (bin = 1mm for edge length hash key).
+  // Forest uses ±8 bins (~±8m per edge); drone_detect_lidar uses ±5 (~±5m) to balance
+  // recall vs. search cost. 11^3 = 1331 voxels vs. original 27.
+  static const int kVoxelRadius = 3;
+
   std::vector<Eigen::Vector3i> getVoxelRound() {
     std::vector<Eigen::Vector3i> voxels;
-    for (int dx = -1; dx <= 1; dx++)
-      for (int dy = -1; dy <= 1; dy++)
-        for (int dz = -1; dz <= 1; dz++)
+    voxels.reserve((2 * kVoxelRadius + 1) * (2 * kVoxelRadius + 1) * (2 * kVoxelRadius + 1));
+    for (int dx = -kVoxelRadius; dx <= kVoxelRadius; dx++)
+      for (int dy = -kVoxelRadius; dy <= kVoxelRadius; dy++)
+        for (int dz = -kVoxelRadius; dz <= kVoxelRadius; dz++)
           voxels.push_back(Eigen::Vector3i(dx, dy, dz));
     return voxels;
   }
@@ -297,20 +282,33 @@ private:
   }
 
   void computeTimerCallback(const ros::TimerEvent&) {
-    if (!has_self_trees_ || !has_neighbor_trees_ || !has_self_odom_ || !has_neighbor_odom_) {
-      ROS_DEBUG_THROTTLE(1.0, "[TreeLocNode] Waiting for data");
-      return;
+    // Thread-safe snapshot of shared data
+    drone_detect_lidar::TreeDetection::ConstPtr self_trees_snap;
+    drone_detect_lidar::TreeDetection::ConstPtr neighbor_trees_snap;
+    nav_msgs::Odometry::ConstPtr self_odom_snap;
+    nav_msgs::Odometry::ConstPtr neighbor_odom_snap;
+    {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      if (!has_self_trees_ || !has_neighbor_trees_ ||
+          !has_self_odom_ || !has_neighbor_odom_) {
+        ROS_DEBUG_THROTTLE(1.0, "[TreeLocNode] Waiting for data");
+        return;
+      }
+      self_trees_snap = self_trees_;
+      neighbor_trees_snap = neighbor_trees_;
+      self_odom_snap = self_odom_;
+      neighbor_odom_snap = neighbor_odom_;
     }
 
     // ===== Step 0: Distance filter =====
     Eigen::Vector3d p_self(
-      self_odom_->pose.pose.position.x,
-      self_odom_->pose.pose.position.y,
-      self_odom_->pose.pose.position.z);
+      self_odom_snap->pose.pose.position.x,
+      self_odom_snap->pose.pose.position.y,
+      self_odom_snap->pose.pose.position.z);
     Eigen::Vector3d p_neighbor(
-      neighbor_odom_->pose.pose.position.x,
-      neighbor_odom_->pose.pose.position.y,
-      neighbor_odom_->pose.pose.position.z);
+      neighbor_odom_snap->pose.pose.position.x,
+      neighbor_odom_snap->pose.pose.position.y,
+      neighbor_odom_snap->pose.pose.position.z);
 
     double drone_dist = (p_self - p_neighbor).norm();
     if (drone_dist > drone_dist_threshold_) {
@@ -319,8 +317,8 @@ private:
     }
 
     // ===== Step 1: Collect trees =====
-    const auto& self_trees = self_trees_->trees;
-    const auto& neighbor_trees = neighbor_trees_->trees;
+    const auto& self_trees = self_trees_snap->trees;
+    const auto& neighbor_trees = neighbor_trees_snap->trees;
 
     if (self_trees.size() < 3 || neighbor_trees.size() < 3) {
       ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] Not enough trees: self=%zu, neighbor=%zu",
@@ -350,14 +348,14 @@ private:
       self_tri_map[key].push_back((int)i);
     }
 
-    // 2b. Rough matching: neighbor triangles search in 27 voxels
+    // 2b. Rough matching: neighbor triangles search in hash space
     auto voxel_round = getVoxelRound();
     std::vector<TriMatch> candidate_matches;
 
     for (size_t ni = 0; ni < neighbor_tris.size(); ni++) {
       TriKey key = makeKey(neighbor_tris[ni].a, neighbor_tris[ni].b, neighbor_tris[ni].c);
       double side_norm = neighbor_tris[ni].a + neighbor_tris[ni].b + neighbor_tris[ni].c;
-      double dis_threshold = side_norm * rough_dis_ratio_;
+      double dis_threshold = side_norm * tri_config_.rough_dis_ratio;
 
       for (auto& v : voxel_round) {
         TriKey search_key(
@@ -369,6 +367,13 @@ private:
 
         for (int si : it->second) {
           if (edgeDist(self_tris[si], neighbor_tris[ni]) < dis_threshold) {
+            // Centroid distance filter (forest_loop_detector style):
+            // Both drones report trees in world frame, so matching triangles
+            // from the SAME trees should have nearly identical centroids.
+            // We use 3m as a conservative bound to account for detection noise.
+            double centroid_dist = (self_tris[si].center - neighbor_tris[ni].center).norm();
+            if (centroid_dist > 3.0) continue;
+
             candidate_matches.push_back({si, (int)ni});
           }
         }
@@ -380,12 +385,22 @@ private:
       return;
     }
 
-    ROS_INFO("[TreeLocNode] Candidate triangle pairs: %zu", candidate_matches.size());
+    ROS_DEBUG("[TreeLocNode] Candidate triangle pairs after centroid filter: %zu",
+              candidate_matches.size());
 
-    // 2c. Voting verification (HashReg candidate_frames_verify)
+    // ===== Step 0b: Odometry-based relative pose prior =====
+    // Use drone odometry as an initial guess for the relative transform.
+    // Any tree-matching result that deviates too far from this prior is
+    // likely a false match (e.g. matching triangles from different tree groups).
+    Eigen::Vector2d t_odom(
+      p_neighbor[0] - p_self[0],
+      p_neighbor[1] - p_self[1]);
+
+    // 2c. Voting verification with odometry prior (HashReg candidate_frames_verify)
     int best_vote = 0;
     Eigen::Vector2d t_best(0, 0);
     Eigen::Matrix2d R_best = Eigen::Matrix2d::Identity();
+    double best_odom_dist = 1e9;  // distance from odometry prior (for tie-breaking)
 
     // Pre-build point list for fast verification
     std::vector<Eigen::Vector2d> self_pts(self_trees.size());
@@ -395,6 +410,11 @@ private:
     for (size_t i = 0; i < neighbor_trees.size(); i++)
       neighbor_pts[i] << neighbor_trees[i].x, neighbor_trees[i].y;
 
+    // Odometry consistency tolerance: translation within 2m of odometry prior
+    // yaw within 30 degrees. These are generous enough for odometry drift.
+    const double kMaxOdomTransDist = 2.0;
+    const double kMaxOdomYawDeg = 30.0;
+
     for (size_t m = 0; m < candidate_matches.size(); m++) {
       std::pair<Eigen::Vector2d, Eigen::Matrix2d> result =
         triangleSolver(self_tris[candidate_matches[m].self_idx],
@@ -402,21 +422,38 @@ private:
       Eigen::Vector2d t = result.first;
       Eigen::Matrix2d R = result.second;
 
+      // Check consistency with odometry prior
+      double trans_diff = (t - t_odom).norm();
+      if (trans_diff > kMaxOdomTransDist) {
+        continue;  // Translation too far from odometry, likely false match
+      }
+      double yaw = std::atan2(R(1, 0), R(0, 0));
+      double yaw_diff_deg = std::abs(yaw) * 180.0 / M_PI;
+      // Note: odometry gives translation only (no yaw diff available since we
+      // don't have relative yaw from odom directly). We just check that the
+      // resulting yaw is within a reasonable range.
+      if (yaw_diff_deg > kMaxOdomYawDeg + max_yaw_deg_) {
+        continue;  // Yaw too large
+      }
+
       int vote = 0;
       for (size_t i = 0; i < self_pts.size(); i++) {
         Eigen::Vector2d transformed = R * self_pts[i] + t;
         for (size_t j = 0; j < neighbor_pts.size(); j++) {
-          if ((neighbor_pts[j] - transformed).norm() < geom_verify_dist_) {
+          if ((neighbor_pts[j] - transformed).norm() < tri_config_.geom_verify_dist) {
             vote++;
             break;
           }
         }
       }
 
-      if (vote > best_vote) {
+      // Prefer higher vote; break ties by choosing the one closer to odometry prior
+      double odom_dist = trans_diff;
+      if (vote > best_vote || (vote == best_vote && vote > 0 && odom_dist < best_odom_dist)) {
         best_vote = vote;
         t_best = t;
         R_best = R;
+        best_odom_dist = odom_dist;
       }
     }
 
@@ -425,7 +462,8 @@ private:
       return;
     }
 
-    ROS_INFO("[TreeLocNode] Best triangle match vote: %d", best_vote);
+    ROS_INFO("[TreeLocNode] Best triangle match vote: %d, odom_prior_diff=%.3f m",
+             best_vote, best_odom_dist);
 
     // 2d. Collect correspondences using best (t, R)
     struct MatchedPair {
@@ -438,7 +476,7 @@ private:
 
     for (size_t i = 0; i < self_pts.size(); i++) {
       Eigen::Vector2d transformed = R_best * self_pts[i] + t_best;
-      double best_dist = geom_verify_dist_;
+      double best_dist = tri_config_.geom_verify_dist;
       int best_j = -1;
       for (size_t j = 0; j < neighbor_pts.size(); j++) {
         if (neighbor_used[j]) continue;
@@ -461,24 +499,42 @@ private:
       return;
     }
 
-    // ===== Step 4: Final 2D SVD =====
+    // ===== Step 4: Weighted 2D SVD =====
+    // Weight each pair by the geometric mean of the two trees' detection confidence,
+    // giving more influence to high-quality tree detections (high linearity, roundness, point count).
     int n = matched_pairs.size();
-    Eigen::MatrixXd P(2, n), Q(2, n);
-
+    Eigen::VectorXd weights(n);
+    double weight_sum = 0.0;
     for (int i = 0; i < n; i++) {
-      P(0, i) = self_trees[matched_pairs[i].self_idx].x;
-      P(1, i) = self_trees[matched_pairs[i].self_idx].y;
-      Q(0, i) = neighbor_trees[matched_pairs[i].neighbor_idx].x;
-      Q(1, i) = neighbor_trees[matched_pairs[i].neighbor_idx].y;
+      double w_self  = self_trees[matched_pairs[i].self_idx].confidence;
+      double w_neigh = neighbor_trees[matched_pairs[i].neighbor_idx].confidence;
+      // Geometric mean: down-weights pairs where either detection is low confidence
+      weights(i) = std::sqrt(std::max(w_self, 1e-6) * std::max(w_neigh, 1e-6));
+      weight_sum += weights(i);
+    }
+    // Normalize so weights sum to 1 (numerical stability, doesn't change the solution)
+    weights /= weight_sum;
+
+    // Weighted centroids
+    Eigen::Vector2d mu_P(0, 0), mu_Q(0, 0);
+    for (int i = 0; i < n; i++) {
+      mu_P(0) += weights(i) * self_trees[matched_pairs[i].self_idx].x;
+      mu_P(1) += weights(i) * self_trees[matched_pairs[i].self_idx].y;
+      mu_Q(0) += weights(i) * neighbor_trees[matched_pairs[i].neighbor_idx].x;
+      mu_Q(1) += weights(i) * neighbor_trees[matched_pairs[i].neighbor_idx].y;
     }
 
-    Eigen::Vector2d mu_P = P.rowwise().mean();
-    Eigen::Vector2d mu_Q = Q.rowwise().mean();
+    // Weighted centered points (scaled by sqrt(w_i))
+    Eigen::MatrixXd P_w(2, n), Q_w(2, n);
+    for (int i = 0; i < n; i++) {
+      double sqrt_w = std::sqrt(weights(i));
+      P_w(0, i) = sqrt_w * (self_trees[matched_pairs[i].self_idx].x - mu_P(0));
+      P_w(1, i) = sqrt_w * (self_trees[matched_pairs[i].self_idx].y - mu_P(1));
+      Q_w(0, i) = sqrt_w * (neighbor_trees[matched_pairs[i].neighbor_idx].x - mu_Q(0));
+      Q_w(1, i) = sqrt_w * (neighbor_trees[matched_pairs[i].neighbor_idx].y - mu_Q(1));
+    }
 
-    Eigen::MatrixXd P_c = P.colwise() - mu_P;
-    Eigen::MatrixXd Q_c = Q.colwise() - mu_Q;
-
-    Eigen::Matrix2d H = P_c * Q_c.transpose();
+    Eigen::Matrix2d H = P_w * Q_w.transpose();
 
     Eigen::JacobiSVD<Eigen::Matrix2d> svd(H, Eigen::ComputeFullU | Eigen::ComputeFullV);
     Eigen::Matrix2d U = svd.matrixU();
@@ -497,13 +553,18 @@ private:
     double trans_norm = t.norm();
     double yaw_deg = std::abs(yaw) * 180.0 / M_PI;
 
-    double rms_residual = 0;
+    // Weighted RMS residual (using same weights as SVD)
+    double wrms_residual = 0;
     for (int i = 0; i < n; i++) {
-      Eigen::Vector2d p_transformed = R * P.col(i) + t;
-      Eigen::Vector2d diff = Q.col(i) - p_transformed;
-      rms_residual += diff.squaredNorm();
+      double sx = self_trees[matched_pairs[i].self_idx].x;
+      double sy = self_trees[matched_pairs[i].self_idx].y;
+      double nx = neighbor_trees[matched_pairs[i].neighbor_idx].x;
+      double ny = neighbor_trees[matched_pairs[i].neighbor_idx].y;
+      double dx = nx - (R(0,0) * sx + R(0,1) * sy + t(0));
+      double dy = ny - (R(1,0) * sx + R(1,1) * sy + t(1));
+      wrms_residual += weights(i) * (dx*dx + dy*dy);
     }
-    rms_residual = std::sqrt(rms_residual / n);
+    wrms_residual = std::sqrt(wrms_residual);  // weights already sum to 1
 
     if (trans_norm > max_translation_) {
       ROS_WARN("[TreeLocNode] Translation too large: %.3f m", trans_norm);
@@ -513,13 +574,13 @@ private:
       ROS_WARN("[TreeLocNode] Yaw too large: %.1f deg", yaw_deg);
       return;
     }
-    if (rms_residual > max_match_residual_) {
-      ROS_WARN("[TreeLocNode] RMS residual too large: %.3f m", rms_residual);
+    if (wrms_residual > max_match_residual_) {
+      ROS_WARN("[TreeLocNode] Weighted RMS residual too large: %.3f m", wrms_residual);
       return;
     }
 
     // ===== Step 6: Publish =====
-    last_fitness_ = rms_residual;
+    last_fitness_ = wrms_residual;
 
     geometry_msgs::Vector3 error_msg;
     error_msg.x = t(0);
@@ -529,45 +590,47 @@ private:
 
     drone_detect_lidar::TreeRelativePose rel_msg;
     rel_msg.header.stamp = ros::Time::now();
-    rel_msg.header.frame_id = self_odom_->header.frame_id;
+    rel_msg.header.frame_id = self_odom_snap->header.frame_id;
     rel_msg.src_drone_id = drone_id_;
-    rel_msg.dst_drone_id = neighbor_trees_->drone_id;
+    rel_msg.dst_drone_id = neighbor_trees_snap->drone_id;
     rel_msg.dx = t(0);
     rel_msg.dy = t(1);
     rel_msg.yaw = yaw;
-    double sigma2 = (rms_residual * rms_residual) / std::max(1, n);
+    double sigma2 = (wrms_residual * wrms_residual) / std::max(1, n);
     rel_msg.covariance[0] = sigma2;
     rel_msg.covariance[4] = sigma2;
     rel_msg.covariance[8] = sigma2;
-    rel_msg.rms_residual = rms_residual;
+    rel_msg.rms_residual = wrms_residual;
     rel_msg.num_matched_trees = n;
     tree_relative_pose_msg_pub_.publish(rel_msg);
 
     geometry_msgs::PoseStamped pose_msg;
     pose_msg.header.stamp = ros::Time::now();
-    pose_msg.header.frame_id = self_odom_->header.frame_id;
+    pose_msg.header.frame_id = self_odom_snap->header.frame_id;
     pose_msg.pose.position.x = trans_norm;
     pose_msg.pose.orientation.w = std::cos(yaw / 2.0);
     pose_msg.pose.orientation.z = std::sin(yaw / 2.0);
     tree_relative_pose_pub_.publish(pose_msg);
 
-    sensor_msgs::PointCloud pair_vis;
-    pair_vis.header.stamp = ros::Time::now();
-    pair_vis.header.frame_id = self_odom_->header.frame_id;
-    pair_vis.points.resize(n * 2);
+    sensor_msgs::PointCloud2 pair_vis;
+    pcl::PointCloud<pcl::PointXYZ> pcl_cloud;
+    pcl_cloud.reserve(n * 2);
     for (int i = 0; i < n; i++) {
-      pair_vis.points[i * 2].x = P(0, i);
-      pair_vis.points[i * 2].y = P(1, i);
-      pair_vis.points[i * 2].z = 0.0;
-      pair_vis.points[i * 2 + 1].x = Q(0, i);
-      pair_vis.points[i * 2 + 1].y = Q(1, i);
-      pair_vis.points[i * 2 + 1].z = 0.0;
+      pcl_cloud.push_back(pcl::PointXYZ(
+        self_trees[matched_pairs[i].self_idx].x,
+        self_trees[matched_pairs[i].self_idx].y, 0.0));
+      pcl_cloud.push_back(pcl::PointXYZ(
+        neighbor_trees[matched_pairs[i].neighbor_idx].x,
+        neighbor_trees[matched_pairs[i].neighbor_idx].y, 0.0));
     }
+    pcl::toROSMsg(pcl_cloud, pair_vis);
+    pair_vis.header.stamp = ros::Time::now();
+    pair_vis.header.frame_id = self_odom_snap->header.frame_id;
     matched_tree_pairs_pub_.publish(pair_vis);
 
     ROS_INFO("[TreeLocNode] drone_dist=%.1fm, matched=%d, trans=(%.3f, %.3f), "
-             "yaw=%.2f deg, rms=%.3fm",
-             drone_dist, n, t(0), t(1), yaw_deg, rms_residual);
+             "yaw=%.2f deg, wrms=%.3fm",
+             drone_dist, n, t(0), t(1), yaw_deg, wrms_residual);
   }
 };
 

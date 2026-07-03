@@ -35,17 +35,6 @@
   <!-- 树干检测与配准参数 -->
   <arg name="enable_lidar_detect" value="true"/>
   <arg name="enable_graph_opt" value="true"/>
-  <arg name="compute_frequency" value="5.0"/>
-  <arg name="tree_height_min" value="0.3"/>
-  <arg name="tree_height_max" value="3.0"/>
-  <arg name="triangle_min_side" value="0.3"/>
-  <arg name="triangle_max_side" value="20.0"/>
-  <arg name="isosceles_threshold" value="0.1"/>
-  <arg name="equilateral_threshold" value="0.15"/>
-  <arg name="rough_dis_ratio" value="0.05"/>
-  <arg name="geom_verify_dist" value="0.3"/>
-  <arg name="min_common_trees" value="3"/>
-  <arg name="drone_dist_threshold" value="15.0"/>
 
   <!-- ========================================================================
        1. 地图发布
@@ -102,22 +91,9 @@
     <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
       <arg name="drone_id" value="$(arg uav_id_1)"/>
       <arg name="odom_topic" value="$(arg odom_topic)"/>
-      <arg name="compute_frequency" value="$(arg compute_frequency)"/>
-      <arg name="tree_height_min" value="$(arg tree_height_min)"/>
-      <arg name="tree_height_max" value="$(arg tree_height_max)"/>
-      <arg name="triangle_min_side" value="$(arg triangle_min_side)"/>
-      <arg name="triangle_max_side" value="$(arg triangle_max_side)"/>
-      <arg name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
-      <arg name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
-      <arg name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
-      <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
-      <arg name="min_common_trees" value="$(arg min_common_trees)"/>
-      <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
       <arg name="enable_graph_opt" value="$(arg enable_graph_opt)"/>
       <arg name="anchor_drone_id" value="$(arg uav_id_1)"/>
       <arg name="enable_relay" value="false"/>
-      <arg name="broadcast_ip" value="255.255.255.255"/>
-      <arg name="next_drone_ip" value="127.0.0.1"/>
     </include>
   </group>
 
@@ -166,21 +142,8 @@
     <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
       <arg name="drone_id" value="$(arg uav_id_2)"/>
       <arg name="odom_topic" value="$(arg odom_topic)"/>
-      <arg name="compute_frequency" value="$(arg compute_frequency)"/>
-      <arg name="tree_height_min" value="$(arg tree_height_min)"/>
-      <arg name="tree_height_max" value="$(arg tree_height_max)"/>
-      <arg name="triangle_min_side" value="$(arg triangle_min_side)"/>
-      <arg name="triangle_max_side" value="$(arg triangle_max_side)"/>
-      <arg name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
-      <arg name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
-      <arg name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
-      <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
-      <arg name="min_common_trees" value="$(arg min_common_trees)"/>
-      <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
       <arg name="enable_graph_opt" value="false"/>
       <arg name="enable_relay" value="false"/>
-      <arg name="broadcast_ip" value="255.255.255.255"/>
-      <arg name="next_drone_ip" value="127.0.0.1"/>
     </include>
   </group>
 
@@ -229,21 +192,8 @@
     <include file="$(find drone_detect_lidar)/launch/drone_detect_lidar.launch">
       <arg name="drone_id" value="$(arg uav_id_3)"/>
       <arg name="odom_topic" value="$(arg odom_topic)"/>
-      <arg name="compute_frequency" value="$(arg compute_frequency)"/>
-      <arg name="tree_height_min" value="$(arg tree_height_min)"/>
-      <arg name="tree_height_max" value="$(arg tree_height_max)"/>
-      <arg name="triangle_min_side" value="$(arg triangle_min_side)"/>
-      <arg name="triangle_max_side" value="$(arg triangle_max_side)"/>
-      <arg name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
-      <arg name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
-      <arg name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
-      <arg name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
-      <arg name="min_common_trees" value="$(arg min_common_trees)"/>
-      <arg name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
       <arg name="enable_graph_opt" value="false"/>
       <arg name="enable_relay" value="false"/>
-      <arg name="broadcast_ip" value="255.255.255.255"/>
-      <arg name="next_drone_ip" value="127.0.0.1"/>
     </include>
   </group>
 

@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(drone_detect_lidar)
 
-## Compile as C++11
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 ## Set build type
@@ -28,8 +27,11 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## Find system libraries
 find_package(Eigen3 REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common io filters kdtree search segmentation)
-find_package(OpenCV REQUIRED)
+## Drop explicit find_package(PCL) — pcl_ros (catkin component above)
+## already pulls in PCL 1.10 headers and libs via ${catkin_INCLUDE_DIRS}
+## and ${catkin_LIBRARIES}.  Calling find_package(PCL) here would resolve
+## to the custom 1.12 install at /home/mspace/pcl-1.12, creating a
+## header/library version mismatch.
 find_package(GTSAM QUIET)
 
 if(GTSAM_FOUND)
@@ -77,7 +79,6 @@ catkin_package(
   DEPENDS
     EIGEN3
     PCL
-    OpenCV
     GTSAM
 )
 
@@ -90,19 +91,17 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${EIGEN3_INCLUDE_DIR}
-  ${PCL_INCLUDE_DIRS}
-  ${OpenCV_INCLUDE_DIRS}
-)
-
-## Link directories
-link_directories(
-  ${PCL_LIBRARY_DIRS}
 )
 
 ## Definitions
+## PCL_NO_PRECOMPILE: force implicit template instantiation for PointXYZ.
+## Both PCL 1.10 and 1.12 only pre-compile PCLBase/Filter/Search/VoxelGrid
+## for specific point types (PointXYZRGB, PointXYZI, etc.), not plain PointXYZ.
+## Without this flag, template method bodies are invisible and the linker
+## fails with undefined vtable references.
 add_definitions(
-  ${PCL_DEFINITIONS}
   -DEIGEN_NO_DEBUG
+  -DPCL_NO_PRECOMPILE
 )
 
 ## Tree detector library
@@ -111,16 +110,13 @@ add_library(${PROJECT_NAME}_tree_detector
 )
 target_link_libraries(${PROJECT_NAME}_tree_detector
   ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OpenCV_LIBS}
 )
 
 ## Executables
-add_executable(tree_detector_node src/tree_detector_node.cpp)
+add_executable(tree_detector_node src/tree_detector_node.cpp src/patchworkpp.cpp)
 target_link_libraries(tree_detector_node
   ${PROJECT_NAME}_tree_detector
   ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
 )
 add_dependencies(tree_detector_node
   ${PROJECT_NAME}_tree_detector
@@ -130,7 +126,6 @@ add_dependencies(tree_detector_node
 add_executable(tree_loc_node src/tree_loc_node.cpp)
 target_link_libraries(tree_loc_node
   ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
 )
 add_dependencies(tree_loc_node
   ${catkin_EXPORTED_TARGETS}

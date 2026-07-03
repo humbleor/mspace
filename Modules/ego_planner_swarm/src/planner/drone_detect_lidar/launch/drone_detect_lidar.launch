@@ -10,27 +10,6 @@
   <!-- 计算参数 -->
   <arg name="compute_frequency" default="5.0"/>
 
-  <!-- 树检测参数 -->
-  <arg name="tree_height_min" default="0.3"/>
-  <arg name="tree_height_max" default="3.0"/>
-  <arg name="tree_voxel_size" default="0.15"/>
-  <arg name="tree_cluster_tolerance" default="0.3"/>
-  <arg name="tree_min_cluster_size" default="20"/>
-  <arg name="tree_max_cluster_size" default="5000"/>
-  <arg name="tree_linearity_threshold" default="0.6"/>
-  <!-- 树匹配参数 -->
-  <arg name="triangle_min_side" default="0.3"/>
-  <arg name="triangle_max_side" default="20.0"/>
-  <arg name="isosceles_threshold" default="0.1"/>
-  <arg name="equilateral_threshold" default="0.15"/>
-  <arg name="rough_dis_ratio" default="0.05"/>
-  <arg name="geom_verify_dist" default="0.3"/>
-  <arg name="min_common_trees" default="3"/>
-  <arg name="drone_dist_threshold" default="15.0"/>
-  <arg name="max_translation" default="3.0"/>
-  <arg name="max_yaw_deg" default="20.0"/>
-  <arg name="max_match_residual" default="0.5"/>
-
   <!-- 因子图优化 -->
   <arg name="enable_graph_opt" default="false"/>
   <arg name="anchor_drone_id" default="1"/>
@@ -46,35 +25,15 @@
   <arg name="enable_relay" default="true"/>
 
   <!-- ========================================================================
-       1. 加载参数
+       1. 加载参数 (所有检测/匹配参数统一在 config/params.yaml 管理)
        ======================================================================== -->
   <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
 
-  <!-- 参数覆盖 -->
+  <!-- 场景覆盖参数 (通过 launch arg 灵活修改) -->
   <param name="drone_id" value="$(arg drone_id)"/>
   <param name="compute_frequency" value="$(arg compute_frequency)"/>
   <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
   <param name="broadcast_port" value="$(arg broadcast_port)"/>
-
-  <param name="tree_height_min" value="$(arg tree_height_min)"/>
-  <param name="tree_height_max" value="$(arg tree_height_max)"/>
-  <param name="tree_voxel_size" value="$(arg tree_voxel_size)"/>
-  <param name="tree_cluster_tolerance" value="$(arg tree_cluster_tolerance)"/>
-  <param name="tree_min_cluster_size" value="$(arg tree_min_cluster_size)"/>
-  <param name="tree_max_cluster_size" value="$(arg tree_max_cluster_size)"/>
-  <param name="tree_linearity_threshold" value="$(arg tree_linearity_threshold)"/>
-  <param name="triangle_min_side" value="$(arg triangle_min_side)"/>
-  <param name="triangle_max_side" value="$(arg triangle_max_side)"/>
-  <param name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
-  <param name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
-  <param name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
-  <param name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
-  <param name="min_common_trees" value="$(arg min_common_trees)"/>
-  <param name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
-  <param name="max_translation" value="$(arg max_translation)"/>
-  <param name="max_yaw_deg" value="$(arg max_yaw_deg)"/>
-  <param name="max_match_residual" value="$(arg max_match_residual)"/>
-
   <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
   <param name="optimize_freq" value="$(arg optimize_freq)"/>
   <param name="window_size" value="$(arg window_size)"/>
@@ -100,14 +59,6 @@
         name="drone_$(arg drone_id)_tree_loc" output="screen">
     <param name="drone_id" value="$(arg drone_id)"/>
     <param name="compute_frequency" value="$(arg compute_frequency)"/>
-    <param name="drone_dist_threshold" value="$(arg drone_dist_threshold)"/>
-    <param name="triangle_min_side" value="$(arg triangle_min_side)"/>
-    <param name="triangle_max_side" value="$(arg triangle_max_side)"/>
-    <param name="isosceles_threshold" value="$(arg isosceles_threshold)"/>
-    <param name="equilateral_threshold" value="$(arg equilateral_threshold)"/>
-    <param name="rough_dis_ratio" value="$(arg rough_dis_ratio)"/>
-    <param name="geom_verify_dist" value="$(arg geom_verify_dist)"/>
-    <param name="min_common_trees" value="$(arg min_common_trees)"/>
 
     <remap from="~self_tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
     <remap from="~neighbor_tree_detection" to="/uav$(arg drone_id)/neighbor_tree_detection"/>
@@ -128,13 +79,10 @@
             name="tree_graph" output="screen">
         <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
         <param name="optimize_freq" value="$(arg optimize_freq)"/>
-        <param name="min_common_trees" value="$(arg min_common_trees)"/>
         <param name="window_size" value="$(arg window_size)"/>
         <remap from="~self_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
         <remap from="~uav2_relative_pose_msg" to="/uav2/tree_relative_pose_msg"/>
         <remap from="~uav3_relative_pose_msg" to="/uav3/tree_relative_pose_msg"/>
-        <remap from="~uav4_relative_pose_msg" to="/uav4/tree_relative_pose_msg"/>
-        <remap from="~uav5_relative_pose_msg" to="/uav5/tree_relative_pose_msg"/>
         <remap from="~optimized_pose" to="/uav$(arg drone_id)/tree_relative_pose_optimized"/>
       </node>
     </group>

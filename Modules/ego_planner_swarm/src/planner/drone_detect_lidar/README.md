@@ -18,7 +18,7 @@
 
 ### 为什么不用 ICP？
 
-在森林林冠下环境中，角点/面点特征提取存在**视角依赖性**——两架无人机从不同位置观察同一棵树，提取的角点和面点不是同一批物理点，导致 ICP 匹配错误、fitness score 异常。此外，高度裁剪窗口 [0.3, 3.0] 意味着不同飞行高度的无人机看到的树干段不同，"质心"随之偏移。本模块使用**树干主成分轴与地面的交点**（树根位置）作为特征，该点在世界坐标系中是视点无关的固定地标，从根本上解决了这个问题。
+在森林林冠下环境中，角点/面点特征提取存在**视角依赖性**——两架无人机从不同位置观察同一棵树，提取的角点和面点不是同一批物理点，导致 ICP 匹配错误、fitness score 异常。此外，高度裁剪窗口 [0.3, 3.0] 意味着不同飞行高度的无人机看到的树干段不同，"质心"随之偏移。本模块使用**树干质心 XY 坐标 + 最低点 Z** 作为特征，在同一高度飞行时具有较好的一致性。
 
 ---
 
@@ -110,9 +110,9 @@ rostopic echo /uav1/tree_relative_pose_optimized
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Drone A (tree_detector_node)                   │
 │                                                                  │
-│  LiDAR 点云 → 体素降采样 → Z轴高度裁剪 → RANSAC地面平面移除       │
+│  LiDAR 点云 → 体素降采样 → Z轴高度裁剪 → PatchWork++地面剔除       │
 │                      → 欧氏聚类 → PCA多条件筛选                  │
-│                      → 树干主成分轴与地面交点计算                 │
+│                      → 树干位置计算 (质心XY + 最低Z)              │
 │                      → 树干参数估计 (x,y,z_base,height,diameter)  │
 │                              │                                    │
 │                              ▼                                    │
@@ -164,12 +164,11 @@ rostopic echo /uav1/tree_relative_pose_optimized
 
 保留 Z 坐标在 `[tree_height_min, tree_height_max]` 范围内的点（默认 [0.3m, 3.0m]），去除地面杂波和树冠部分。
 
-#### 步骤 3: RANSAC 地面平面移除
+#### 步骤 3: PatchWork++ 地面剔除
 
-使用 `pcl::SACSegmentation` 进行 RANSAC 平面拟合：
-- 模型：`SACMODEL_PLANE`，最大迭代 50 次，距离阈值 0.15m
-- 拟合成功后**保存地面平面方程** `ax + by + cz + d = 0`
-- 提取非地面点（去除地面平面内点），保留树干等垂直结构
+使用 PatchWork++ 算法进行地面分割：
+- 自适应地面估计，无需保存全局平面方程
+- 提取非地面点，保留树干等垂直结构
 
 #### 步骤 4: 欧氏聚类
 
@@ -193,22 +192,19 @@ rostopic echo /uav1/tree_relative_pose_optimized
 
 #### 步骤 6: 树干参数估计
 
-**树干位置 — 主成分轴与地面的交点**:
+**树干位置 — 质心 XY + 最低 Z**:
 
-树干的主成分方向 **v₂**（对应最大特征值）表示树干的延伸方向。将主成分轴（质心 + **v₂** 方向）与 RANSAC 地面平面求交：
+使用聚类质心的 XY 坐标和最低点的 Z 坐标作为树干位置：
 
 ```
-射线: P = centroid - t · v₂  （沿主成分方向向下搜索）
-平面: ax + by + cz + d = 0
-求解: t = -(a·cx + b·cy + c·cz + d) / (a·vx + b·vy + c·vz)
-交点: ground_point = centroid - t · v₂
+tree.x = centroid[0]      # 质心 X
+tree.y = centroid[1]      # 质心 Y
+tree.z_base = z_min       # 最低点 Z
 ```
-
-交点的 XY 坐标即为 `tree.x` 和 `tree.y`。若地面拟合失败（无平面方程），回退到 `centroid[0], centroid[1], z_min`。
 
 **其他参数**:
 - `height`: 聚类点 Z 范围 (z_max - z_min)
-- `diameter`: 以交点为中心计算点到中心的平均距离 × 2
+- `diameter`: 以质心为中心计算点到中心的平均距离 × 2
 - `confidence`: `linearity × 0.5 + roundness × 0.3 + pts_factor × 0.2`
 
 ---
@@ -408,7 +404,7 @@ argmin Σ || qᵢ - (R · pᵢ + t) ||²
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `id` | `uint32` | 树的唯一 ID |
-| `x, y` | `float64` | 树干主成分轴与地面交点 (world frame) |
+| `x, y` | `float64` | 树干质心 XY 坐标 (world frame) |
 | `z_base` | `float64` | 树干底部 Z |
 | `height` | `float64` | 树高 (m) |
 | `diameter` | `float64` | 树干直径 (m) |
@@ -465,12 +461,12 @@ argmin Σ || qᵢ - (R · pᵢ + t) ||²
 | Topic | 类型 | 说明 |
 |-------|------|------|
 | `/uav{ID}/tree_detection` | `TreeDetection` | 自身树检测结果 |
-| `/uav{ID}/tree_cloud` | `sensor_msgs::PointCloud` | 树干位置可视化 (z = z_base + height/2) |
+| `/uav{ID}/tree_cloud` | `sensor_msgs::PointCloud2` | 树干位置可视化 (z = z_base + height/2) |
 | `/uav{ID}/tree_pose_error` | `geometry_msgs::Vector3` | 位姿误差 (dx, dy, yaw) |
 | `/uav{ID}/tree_relative_pose` | `geometry_msgs::PoseStamped` | 相对位姿 |
 | `/uav{ID}/tree_relative_pose_msg` | `TreeRelativePose` | 相对位姿测量（供因子图优化使用） |
 | `/uav{ID}/tree_relative_pose_optimized` | `TreeRelativePoseOptimized` | 因子图优化后的相对位姿 |
-| `/uav{ID}/matched_tree_pairs` | `sensor_msgs::PointCloud` | 匹配树对可视化 |
+| `/uav{ID}/matched_tree_pairs` | `sensor_msgs::PointCloud2` | 匹配树对可视化 |
 
 ---
 
@@ -480,7 +476,7 @@ argmin Σ || qᵢ - (R · pᵢ + t) ||²
 
 2. **树数量要求**: 至少需要 3 棵树才能构造三角形，从而执行配准。少于 3 棵时跳过计算。
 
-3. **三角形匹配**: 借鉴 HashReg 论文思想，用三棵树构成的三角形三边长作为指纹进行哈希匹配，比距离贪心匹配更鲁棒。等腰/等边三角形被剔除以保证独特性。
+3. **三角形匹配**: 借鉴 HashReg 算法思想，用三棵树构成的三角形三边长作为指纹进行哈希匹配，比距离贪心匹配更鲁棒。等腰/等边三角形被剔除以保证独特性。
 
 4. **投票验证**: 每个候选三角形对求解变换后，用该变换验证所有树的对应关系，选一致性最好的结果。避免单一误匹配导致的错误输出。
 
@@ -498,7 +494,7 @@ argmin Σ || qᵢ - (R · pᵢ + t) ||²
 
 ```bash
 rviz -d $(rospack find drone_detect_lidar)/rviz/lidar_detect.rviz
-# 添加 /uav1/tree_cloud 和 /uav2/tree_cloud 点云查看树干地面交点位置
+# 添加 /uav1/tree_cloud 和 /uav2/tree_cloud 点云查看树干位置
 ```
 
 ### 查看树检测结果

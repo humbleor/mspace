@@ -51,6 +51,9 @@ int main(int argc, char **argv)
         }
 
         nei_state_sub[i] = nh.subscribe<prometheus_msgs::DroneState>("/uav" + std::to_string(i) + "/prometheus/drone_state", 10, boost::bind(nei_state_cb, _1, i));
+
+        //【订阅】邻居的漂移补偿信息
+        tree_drift_sub[i] = nh.subscribe<geometry_msgs::Vector3>("/uav" + std::to_string(i) + "/tree_pose_error", 10, boost::bind(tree_drift_cb, _1, i));
     }
 
     // position_target_sub = nh.subscribe<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/target_local", 10, pos_target_cb);

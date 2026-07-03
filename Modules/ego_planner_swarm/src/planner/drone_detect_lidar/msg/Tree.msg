@@ -6,4 +6,6 @@ float64 z_base         # 树干底部 Z (地面高度)
 float64 height         # 树高 (m)
 float64 diameter       # 树干直径 (m)
 float64 linearity      # PCA 线性度 [0,1]，越高越像树干
+float64 planarity      # PCA 平面度 [0,1]，排除扁平物体
+float64 roundness      # 横截面圆度 [0,1]，越高越接近圆形
 float64 confidence     # 检测置信度 [0,1]

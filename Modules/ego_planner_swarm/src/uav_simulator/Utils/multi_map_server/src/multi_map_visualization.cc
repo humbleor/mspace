@@ -1,6 +1,9 @@
 #include <iostream>
 #include <ros/ros.h>
-#include <sensor_msgs/PointCloud.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl_conversions/pcl_conversions.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
 #include <pose_utils.h>
 #include <multi_map_server/MultiOccupancyGrid.h>
 #include <multi_map_server/MultiSparseMap3D.h>
@@ -42,7 +45,7 @@ void maps3d_callback(const multi_map_server::MultiSparseMap3D::ConstPtr &msg)
     maps3d[k].UnpackMsg(msg->maps[k]);
   origins3d = msg->origins;
   // Publish
-  sensor_msgs::PointCloud m;
+  pcl::PointCloud<pcl::PointXYZ> pcl_cloud;
   for (unsigned int k = 0; k < msg->maps.size(); k++)
   {
     colvec po(6);
@@ -61,14 +64,11 @@ void maps3d_callback(const multi_map_server::MultiSparseMap3D::ConstPtr &msg)
     for (unsigned int i = 0; i < pts.size(); i++)
     {
       colvec pt = Rpo * pts[i] + tpo;
-      geometry_msgs::Point32 _pt;
-      _pt.x = pt(0);
-      _pt.y = pt(1);
-      _pt.z = pt(2);
-      m.points.push_back(_pt);
+      pcl_cloud.push_back(pcl::PointXYZ(pt(0), pt(1), pt(2)));
     }
   }
-  // Publish
+  sensor_msgs::PointCloud2 m;
+  pcl::toROSMsg(pcl_cloud, m);
   m.header.stamp    = ros::Time::now();
   m.header.frame_id = string("/map");
   pub2.publish(m);
@@ -82,7 +82,7 @@ int main(int argc, char** argv)
   ros::Subscriber sub1 = n.subscribe("dmaps2d", 1, maps2d_callback);
   ros::Subscriber sub2 = n.subscribe("dmaps3d", 1, maps3d_callback);
   pub1 = n.advertise<multi_map_server::MultiOccupancyGrid>("maps2d", 1, true);
-  pub2 = n.advertise<sensor_msgs::PointCloud>("map3d", 1, true);
+  pub2 = n.advertise<sensor_msgs::PointCloud2>("map3d", 1, true);
 
   ros::spin();
   return 0;
