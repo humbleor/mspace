@@ -18,7 +18,7 @@
 		<param name="offset_x" value="$(arg uav_init_x)"/>
 		<param name="offset_y" value="$(arg uav_init_y)"/>
 		<param name="offset_z" value="$(arg uav_init_z)"/>
-		<remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/>
+		<remap from="/drone_Odom_high_freq" to="/uav$(arg uav_id)/drone_Odom_high_freq"/>
 	</node>
 
 	<!-- 启动swarm_controller -->

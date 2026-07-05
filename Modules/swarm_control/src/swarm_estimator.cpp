@@ -351,7 +351,7 @@ int main(int argc, char **argv)
     else if (input_source == 4)
     {
         // 【订阅】fast-lio2估计位置
-        lidar_fastlio2_sub = nh.subscribe<nav_msgs::Odometry>("/drone_Odometry", 100, lidar_fastlio2_cb);
+        lidar_fastlio2_sub = nh.subscribe<nav_msgs::Odometry>("/drone_Odom_high_freq", 100, lidar_fastlio2_cb);
     }
     else
     {

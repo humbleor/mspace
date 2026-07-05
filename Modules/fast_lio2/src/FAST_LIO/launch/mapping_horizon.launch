@@ -1,6 +1,7 @@
 <launch>
 <!-- Launch file for Livox Horizon LiDAR -->
 
+	<arg name="uav_id" default="1"/>
 	<arg name="rviz" default="true" />
 
 	<rosparam command="load" file="$(find fast_lio)/config/horizon.yaml" />
@@ -12,6 +13,15 @@
 	<param name="filter_size_map" type="double" value="0.5" />
 	<param name="cube_side_length" type="double" value="1000" />
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
+
+	<remap from="/drone_cloud_registered" to="/uav$(arg uav_id)/drone_cloud_registered"/>
+	<remap from="/drone_cloud_registered_body" to="/uav$(arg uav_id)/drone_cloud_registered_body"/>
+	<remap from="/drone_cloud_effected" to="/uav$(arg uav_id)/drone_cloud_effected"/>
+	<remap from="/drone_Laser_map" to="/uav$(arg uav_id)/drone_Laser_map"/>
+	<remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/>
+	<remap from="/drone_Odom_high_freq" to="/uav$(arg uav_id)/drone_Odom_high_freq"/>
+	<remap from="/drone_path" to="/uav$(arg uav_id)/drone_path"/>
+
     <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen" /> 
 
 	<group if="$(arg rviz)">
