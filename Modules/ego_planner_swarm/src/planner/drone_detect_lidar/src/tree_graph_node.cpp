@@ -14,6 +14,8 @@
 #include <vector>
 #include <deque>
 #include <cmath>
+#include <string>
+#include <boost/bind.hpp>
 
 /**
  * @brief 基于 iSAM2 增量因子图的多机相对位姿优化节点
@@ -47,9 +49,9 @@ public:
     isam2_ = gtsam::ISAM2(isam2_params);
 
     // 订阅各 UAV 的 tree_relative_pose_msg
-    addSubscriber("self_relative_pose_msg");
-    addSubscriber("uav2_relative_pose_msg");
-    addSubscriber("uav3_relative_pose_msg");
+    for (int i = 1; i <= uav_num_; i++) {
+      addSubscriber("uav" + std::to_string(i) + "_relative_pose_msg");
+    }
 
     opt_pub_ = nh_.advertise<drone_detect_lidar::TreeRelativePoseOptimized>("optimized_pose", 10);
 
@@ -61,6 +63,13 @@ public:
   }
 
 private:
+  struct AvgMeasurement {
+    uint32_t src, dst;
+    double dx, dy, yaw;
+    double avg_cov;
+    int count;
+  };
+
   void addSubscriber(const std::string& topic_param) {
     std::string topic_name;
     if (!nh_.getParam(topic_param, topic_name)) {
@@ -90,6 +99,22 @@ private:
     known_drone_ids_.insert(dst);
   }
 
+  // 判断滑窗平均结果是否相对上次有显著变化
+  bool averagedChanged(const std::map<uint32_t, AvgMeasurement>& cur) {
+    if (cur.size() != prev_averaged_.size()) return true;
+    for (const auto& kv : cur) {
+      auto it = prev_averaged_.find(kv.first);
+      if (it == prev_averaged_.end()) return true;
+      const auto& old = it->second;
+      const auto& now = kv.second;
+      if (old.count != now.count) return true;
+      if (std::abs(old.dx - now.dx) > 1e-6 ||
+          std::abs(old.dy - now.dy) > 1e-6 ||
+          std::abs(old.yaw - now.yaw) > 1e-6) return true;
+    }
+    return false;
+  }
+
   void optimizeTimerCallback(const ros::TimerEvent&) {
     boost::mutex::scoped_lock lock(mutex_);
 
@@ -99,13 +124,6 @@ private:
     }
 
     // ---- 滑窗平均 ----
-    struct AvgMeasurement {
-      uint32_t src, dst;
-      double dx, dy, yaw;
-      double avg_cov;
-      int count;
-    };
-
     std::map<uint32_t, AvgMeasurement> averaged;
     for (auto it = recent_measurements_.begin(); it != recent_measurements_.end(); ++it) {
       uint32_t pair_id = it->first;
@@ -166,7 +184,6 @@ private:
     // 为新出现的无人机添加初始估计（第一次出现时需要的初值）
     for (auto id : known_drone_ids_) {
       if (initialized_drone_ids_.find(id) == initialized_drone_ids_.end()) {
-        // 新无人机：从已有估计中查找，或初始化为 (0,0,0)
         try {
           gtsam::Values current = isam2_.calculateEstimate();
           if (current.exists(id)) {
@@ -181,12 +198,25 @@ private:
       }
     }
 
-    // 为当前滑窗平均后的每对测量添加 BetweenFactor
-    // iSAM2 会累积历史测量（不删除旧的），形成信息丰富的因子图
+    // 仅当滑窗平均结果有变化时才添加 BetweenFactor
+    if (!averagedChanged(averaged)) {
+      ROS_DEBUG("[TreeGraphNode] No change in averaged measurements, skipping factor addition");
+      // 仍然执行 iSAM2 求解（变量可能因其他因素更新）
+      if (!new_initial.empty()) {
+        try {
+          isam2_.update(new_factors, new_initial);
+        } catch (const std::exception& e) {
+          ROS_WARN("[TreeGraphNode] iSAM2 update failed: %s", e.what());
+        }
+      }
+      // 仍然发布当前最优估计
+      publishOptimizedPoses(averaged);
+      return;
+    }
+
     for (auto it = averaged.begin(); it != averaged.end(); ++it) {
       const AvgMeasurement& m = it->second;
 
-      // 确保两个端点都已初始化
       if (initialized_drone_ids_.find(m.src) == initialized_drone_ids_.end()) {
         new_initial.insert(m.src, gtsam::Pose2(0.0, 0.0, 0.0));
         initialized_drone_ids_.insert(m.src);
@@ -205,6 +235,8 @@ private:
       new_factors.add(gtsam::BetweenFactor<gtsam::Pose2>(m.src, m.dst, rel_pose, between_noise));
     }
 
+    prev_averaged_ = averaged;
+
     // ---- iSAM2 增量更新 ----
     try {
       total_factors_added_ += new_factors.size();
@@ -220,7 +252,10 @@ private:
       return;
     }
 
-    // ---- 获取当前最优估计 ----
+    publishOptimizedPoses(averaged);
+  }
+
+  void publishOptimizedPoses(const std::map<uint32_t, AvgMeasurement>& averaged) {
     gtsam::Values result_estimate;
     try {
       result_estimate = isam2_.calculateEstimate();
@@ -229,7 +264,6 @@ private:
       return;
     }
 
-    // ---- 发布优化后的两两位姿 ----
     for (auto it = averaged.begin(); it != averaged.end(); ++it) {
       const AvgMeasurement& m = it->second;
       if (!result_estimate.exists(m.src) || !result_estimate.exists(m.dst)) continue;
@@ -260,6 +294,7 @@ private:
     nh_.param("optimize_freq", optimize_freq_, 5.0);
     nh_.param("min_common_trees", min_common_trees_, 3);
     nh_.param("window_size", window_size_, 10);
+    nh_.param("uav_num", uav_num_, 3);
   }
 
   ros::NodeHandle nh_;
@@ -269,6 +304,7 @@ private:
   boost::mutex mutex_;
 
   int anchor_drone_id_;
+  int uav_num_;
   double optimize_freq_;
   int min_common_trees_;
   int window_size_;
@@ -280,6 +316,7 @@ private:
   std::set<uint32_t> initialized_drone_ids_;
 
   std::map<uint32_t, std::deque<drone_detect_lidar::TreeRelativePose::ConstPtr>> recent_measurements_;
+  std::map<uint32_t, AvgMeasurement> prev_averaged_;
   std::set<uint32_t> known_drone_ids_;
 };
 

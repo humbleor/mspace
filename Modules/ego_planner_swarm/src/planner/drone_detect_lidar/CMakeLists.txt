@@ -52,6 +52,7 @@ add_message_files(
   TreeDetection.msg
   TreeRelativePose.msg
   TreeRelativePoseOptimized.msg
+  DriftCorrection.msg
 )
 generate_messages(
   DEPENDENCIES

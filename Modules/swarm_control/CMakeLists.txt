@@ -21,6 +21,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_eigen
   mavros_msgs
   prometheus_msgs
+  drone_detect_lidar
   # quadrotor_msgs
 )
 

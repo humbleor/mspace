@@ -34,17 +34,26 @@ drone_detect_lidar/
 ├── include/
 │   └── drone_detect_lidar/
 │       ├── tree_detector.h      # 树干检测器
-│       └── tree_loc_node.h      # 树匹配定位节点
+│       ├── triangle_matcher.h   # 三角形匹配数据结构
+│       └── patchworkpp.h        # PatchWork++ 地面剔除
 ├── msg/
 │   ├── Tree.msg                # 单棵树干消息
 │   ├── TreeDetection.msg       # 树检测结果消息
 │   ├── TreeRelativePose.msg       # 两机相对位姿测量消息
-│   └── TreeRelativePoseOptimized.msg # 因子图优化后的相对位姿消息
+│   ├── TreeRelativePoseOptimized.msg # 因子图优化后的相对位姿消息
+│   └── DriftCorrection.msg     # 漂移修正诊断消息
 ├── src/
 │   ├── tree_detector.cpp        # 树干检测实现
 │   ├── tree_detector_node.cpp   # 树干检测 ROS 节点
 │   ├── tree_loc_node.cpp        # 树匹配定位节点
-│   └── tree_graph_node.cpp      # 因子图优化节点 (GTSAM)
+│   ├── tree_graph_node.cpp      # 因子图优化节点 (GTSAM)
+│   └── patchworkpp.cpp          # PatchWork++ 地面剔除
+├── Scripts/
+│   ├── evaluate_drift_estimation.py      # 方案B: 漂移估计精度评估
+│   ├── evaluate_correction_offline.py    # 方案C: 修正效果评估
+│   ├── run_tree_drift_eval.sh            # 一键测试脚本 (方案B+C)
+│   ├── tree_drift_injector.py            # 漂移注入工具
+│   └── analyze_tree_pose_error.py        # tree_pose_error 数值统计
 ├── launch/
 │   ├── drone_detect_lidar.launch       # 单无人机启动
 │   ├── 2uav_lidar_detect_sim.launch    # 双机仿真启动
@@ -214,15 +223,13 @@ tree.z_base = z_min       # 最低点 Z
 **输入**: 自身 `TreeDetection` + 邻居 `TreeDetection` + 两机里程计
 **输出**: `tree_pose_error`（dx, dy, yaw）+ `TreeRelativePose`
 
-本阶段借鉴 HashReg 论文的三角形哈希匹配思想，替代原有的距离贪心匹配，提升多机配准鲁棒性。
-
 #### 第 0-1 步: 距离过滤 + 收集树
 
 与阶段一相同。
 
 #### 第 2a 步: 三角形构造
 
-对每架无人机的树干列表，使用 KNN（K=10）找近邻，遍历所有三元组构成三角形。
+对每架无人机的树干列表，使用 KNN（K=min(N,5)）找近邻，遍历所有三元组构成三角形。
 
 对每个三角形的三边长 **a ≤ b ≤ c**（排序后），进行退化过滤：
 
@@ -488,40 +495,117 @@ argmin Σ || qᵢ - (R · pᵢ + t) ||²
 
 ---
 
-## 调试建议
+## 评估测试
 
-### 查看树干检测可视化
+`Scripts/` 目录提供了一套自动化测试工具，用于评估 `tree_pose_error` 的精度和修正效果。
 
-```bash
-rviz -d $(rospack find drone_detect_lidar)/rviz/lidar_detect.rviz
-# 添加 /uav1/tree_cloud 和 /uav2/tree_cloud 点云查看树干位置
+### 测试目标
+
+回答两个核心问题：
+
+| 方案 | 问题 | 对应脚本 |
+|------|------|---------|
+| B | `tree_pose_error` 估计的漂移量有多准？ | `evaluate_drift_estimation.py` |
+| C | 应用修正公式后，邻居位置比修正前准了吗？ | `evaluate_correction_offline.py` |
+
+### 测试原理
+
+```
+仿真 (里程计真值)
+  → tree_detector_node 检测树干
+  → tree_drift_injector 向 UAV2 的树位置注入已知漂移 (dx,dy,yaw)
+  → tree_loc_node 用树匹配估计两帧间的相对变换
+  → 发布 tree_pose_error
+
+方案B: tree_pose_error  vs  注入漂移的理论值        → 估计精度
+方案C: 注入漂移 → 模拟 swarm_controller 修正公式
+       → 对比 |corrected - gt| vs |raw - gt|        → 修正效果
 ```
 
-### 查看树检测结果
+修正公式（与 `swarm_controller::drift_correct_pos_nei` 一致）：
+
+```
+corrected = R(yaw) * pos + t
+即:  corr_x =  cos(yaw)*raw_x - sin(yaw)*raw_y + dx
+      corr_y =  sin(yaw)*raw_x + cos(yaw)*raw_y + dy
+```
+
+### 一键测试
 
 ```bash
+cd Scripts/
+./run_tree_drift_eval.sh [时长] [uav1_dx] [uav1_dy] [uav1_yaw_deg] [uav2_dx] [uav2_dy] [uav2_yaw_deg]
+```
+
+```bash
+# 60秒测试，UAV1 作为 anchor (无漂移)，UAV2 注入 0.5m + 5° 漂移
+./run_tree_drift_eval.sh 60 0 0 0 0.5 0.3 5.0
+```
+
+脚本自动完成：启动仿真 → 注入漂移 → 树匹配 → 录制 rosbag → 方案B + 方案C 评估。
+
+### 输出文件
+
+测试结束后在 `drift_eval_YYYYMMDD_HHMMSS/` 生成：
+
+| 文件 | 内容 |
+|------|------|
+| `drift_est_report.pdf` | 方案B 可视化报告（4 张图） |
+| `drift_est_summary.json` | 方案B 结构化指标 |
+| `drift_est_per_frame.csv` | 方案B 逐帧明细 |
+| `correction_offline_report.pdf` | 方案C 可视化报告（4 张图） |
+| `correction_offline_summary.json` | 方案C 结构化指标 |
+| `correction_offline_per_frame.csv` | 方案C 逐帧明细 |
+
+### 单独运行评估脚本
+
+如果已有 rosbag，可跳过仿真直接评估：
+
+```bash
+# 方案B: 评估漂移估计精度
+python3 evaluate_drift_estimation.py <日志目录>
+
+# 方案C: 评估修正效果（需要 eval_config.json）
+python3 evaluate_correction_offline.py <日志目录>
+```
+
+### 评估指标说明
+
+方案C 核心指标：
+
+| 指标 | 含义 |
+|------|------|
+| 修正前 RMS | 邻居漂移位置 vs 真值的均方根误差 |
+| 修正后 RMS | 应用修正公式后的均方根误差 |
+| 平均改进 | `(err_raw - err_corr) / err_raw * 100%`，正数 = 修正有效 |
+| 正向比例 | 修正后比修正前更准的帧占比，>50% = 总体有效 |
+| 判定 PASS/FAIL | 平均改进 > 0 且正向比例 > 50% |
+
+### 快速查看 tree_pose_error 数值
+
+```bash
+# 在线模式 (ROS 运行中)
+python3 analyze_tree_pose_error.py        # 统计 UAV1+UAV2，Ctrl+C 输出
+python3 analyze_tree_pose_error.py 1      # 仅统计 UAV1
+
+# 离线模式 (从日志)
+python3 analyze_tree_pose_error.py --log <tree_loc_node日志文件>
+```
+
+### 调试话题
+
+```bash
+# 查看树检测结果
 rostopic echo /uav1/tree_detection
-# 观察 tree_count 和每棵树的 x,y,height,diameter
-```
 
-### 查看位姿误差
-
-```bash
+# 查看 tree_pose_error
 rostopic echo /uav1/tree_pose_error
-# 理想情况下（仿真中 odometry 完美），误差应接近 (0, 0, 0)
-```
 
-### 查看因子图优化结果
-
-```bash
+# 查看因子图优化结果 (三机仿真)
 rostopic echo /uav1/tree_relative_pose_optimized
-# 对比 tree_pose_error，观察优化前后的差异
-```
 
-### 查看匹配树对
-
-```bash
-# 在 RViz 中添加 /uav1/matched_tree_pairs 可视化匹配结果
+# RViz 可视化
+rviz -d $(rospack find drone_detect_lidar)/rviz/lidar_detect.rviz
 ```
 
 ---

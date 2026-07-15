@@ -5,6 +5,7 @@
        ======================================================================== -->
 
   <arg name="drone_id" default="1"/>
+  <arg name="uav_num" default="3"/>
   <arg name="odom_topic" default="lidar_slam/odom"/>
 
   <!-- 计算参数 -->
@@ -25,25 +26,19 @@
   <arg name="enable_relay" default="true"/>
 
   <!-- ========================================================================
-       1. 加载参数 (所有检测/匹配参数统一在 config/params.yaml 管理)
-       ======================================================================== -->
-  <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
-
-  <!-- 场景覆盖参数 (通过 launch arg 灵活修改) -->
-  <param name="drone_id" value="$(arg drone_id)"/>
-  <param name="compute_frequency" value="$(arg compute_frequency)"/>
-  <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
-  <param name="broadcast_port" value="$(arg broadcast_port)"/>
-  <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
-  <param name="optimize_freq" value="$(arg optimize_freq)"/>
-  <param name="window_size" value="$(arg window_size)"/>
-
-  <!-- ========================================================================
-       2. 树检测器节点
+       1. 树检测器节点
        ======================================================================== -->
   <node pkg="drone_detect_lidar" type="tree_detector_node"
         name="drone_$(arg drone_id)_tree_detector" output="screen">
+
+    <!-- 加载所有检测/匹配参数到本节点私有命名空间 -->
+    <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
+
+    <!-- 场景覆盖参数 (通过 launch arg 灵活修改) -->
     <param name="drone_id" value="$(arg drone_id)"/>
+    <param name="compute_frequency" value="$(arg compute_frequency)"/>
+    <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
+    <param name="broadcast_port" value="$(arg broadcast_port)"/>
     <param name="frame_id" value="world"/>
 
     <remap from="~lidar_cloud" to="/uav$(arg drone_id)/pcl_render_node/cloud"/>
@@ -53,10 +48,14 @@
   </node>
 
   <!-- ========================================================================
-       3. 树匹配定位节点
+       2. 树匹配定位节点
        ======================================================================== -->
   <node pkg="drone_detect_lidar" type="tree_loc_node"
         name="drone_$(arg drone_id)_tree_loc" output="screen">
+
+    <!-- 加载匹配参数到本节点私有命名空间 -->
+    <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
+
     <param name="drone_id" value="$(arg drone_id)"/>
     <param name="compute_frequency" value="$(arg compute_frequency)"/>
 
@@ -68,28 +67,35 @@
     <remap from="~tree_relative_pose" to="/uav$(arg drone_id)/tree_relative_pose"/>
     <remap from="~tree_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
     <remap from="~matched_tree_pairs" to="/uav$(arg drone_id)/matched_tree_pairs"/>
+    <remap from="~tri_descriptors" to="/uav$(arg drone_id)/tri_descriptors"/>
   </node>
 
   <!-- ========================================================================
-       4. 因子图优化节点 (可选，仅 anchor drone 启动)
+       3. 因子图优化节点 (可选，仅 anchor drone 启动)
        ======================================================================== -->
   <group if="$(arg enable_graph_opt)">
     <group if="$(eval drone_id == anchor_drone_id)">
       <node pkg="drone_detect_lidar" type="tree_graph_node"
             name="tree_graph" output="screen">
+
+        <rosparam command="load" file="$(find drone_detect_lidar)/config/params.yaml"/>
+
         <param name="anchor_drone_id" value="$(arg anchor_drone_id)"/>
         <param name="optimize_freq" value="$(arg optimize_freq)"/>
         <param name="window_size" value="$(arg window_size)"/>
-        <remap from="~self_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
+        <param name="uav_num" value="$(arg uav_num)"/>
+        <remap from="~uav1_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
         <remap from="~uav2_relative_pose_msg" to="/uav2/tree_relative_pose_msg"/>
         <remap from="~uav3_relative_pose_msg" to="/uav3/tree_relative_pose_msg"/>
+        <remap from="~uav4_relative_pose_msg" to="/uav4/tree_relative_pose_msg"/>
+        <remap from="~uav5_relative_pose_msg" to="/uav5/tree_relative_pose_msg"/>
         <remap from="~optimized_pose" to="/uav$(arg drone_id)/tree_relative_pose_optimized"/>
       </node>
     </group>
   </group>
 
   <!-- ========================================================================
-       5. 邻居里程计转发 (仿真测试)
+       4. 邻居里程计转发 (仿真测试)
        ======================================================================== -->
   <group if="$(arg enable_relay)">
   <!-- UAV1 接收 UAV2 的里程计 -->

@@ -54,6 +54,10 @@ int main(int argc, char **argv)
 
         //【订阅】邻居的漂移补偿信息
         tree_drift_sub[i] = nh.subscribe<geometry_msgs::Vector3>("/uav" + std::to_string(i) + "/tree_pose_error", 10, boost::bind(tree_drift_cb, _1, i));
+
+        //【发布】漂移修正诊断信息
+        drift_correction_pub[i] = nh.advertise<drone_detect_lidar::DriftCorrection>(
+            uav_name + "/drift_correction_diag_" + std::to_string(i), 10);
     }
 
     // position_target_sub = nh.subscribe<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/target_local", 10, pos_target_cb);

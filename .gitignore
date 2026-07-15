@@ -2,8 +2,9 @@ build/
 devel/
 Modules/fast_lio2/src/FAST_LIO/PCD/*.pcd
 Modules/ego_planner_swarm/src/uav_simulator/lidar_map_generator/resource
+Modules/ego_planner_swarm/src/planner/drone_detect_lidar/Scripts/drift_eval_*
 Scripts/flight_data/
-GEMINI.md
+AGENTS.md
 # CLAUDE.md
 .catkin_tools
 .vscode

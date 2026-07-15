@@ -150,14 +150,8 @@ private:
   // 发布检测结果
   void publishTrees(const std::vector<TreeInfo>& trees,
                     const ros::Time& stamp, const std::string& frame_id) {
-    // Thread-safe odom snapshot
-    nav_msgs::Odometry::ConstPtr odom_snapshot;
-    {
-      std::lock_guard<std::mutex> lock(odom_mutex_);
-      if (has_odom_) {
-        odom_snapshot = last_odom_;
-      }
-    }
+    // 点云已经是 world frame (pcl_render_node 输出的 cloud topic 是 local_map_pcd，frame_id=world)
+    // 树干位置直接就是世界坐标，无需额外变换
 
     // 发布 TreeDetection 消息
     drone_detect_lidar::TreeDetection det_msg;
@@ -179,17 +173,15 @@ private:
       det_msg.trees[i].confidence = trees[i].confidence;
     }
 
-    if (odom_snapshot) {
-      det_msg.odometry = *odom_snapshot;
-    }
-
     tree_detection_pub_.publish(det_msg);
 
-    // 发布可视化点云（每个树干中心一个点）
+    // 发布可视化点云（每个树干中心一个点，world frame）
     pcl::PointCloud<pcl::PointXYZ> pcl_cloud;
     pcl_cloud.reserve(trees.size());
     for (size_t i = 0; i < trees.size(); i++) {
-      pcl_cloud.push_back(pcl::PointXYZ(trees[i].x, trees[i].y, trees[i].z_base + trees[i].height / 2.0));
+      double tx = det_msg.trees[i].x;
+      double ty = det_msg.trees[i].y;
+      pcl_cloud.push_back(pcl::PointXYZ(tx, ty, trees[i].z_base + trees[i].height / 2.0));
     }
     sensor_msgs::PointCloud2 cloud_vis;
     pcl::toROSMsg(pcl_cloud, cloud_vis);

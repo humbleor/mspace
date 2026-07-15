@@ -1,0 +1,10 @@
+Header header
+uint32 drone_id
+float64 raw_x
+float64 raw_y
+float64 corrected_x
+float64 corrected_y
+float64 drift_dx
+float64 drift_dy
+float64 drift_yaw
+float64 correction_age

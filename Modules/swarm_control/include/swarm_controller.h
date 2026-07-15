@@ -14,6 +14,7 @@
 #include <nav_msgs/Odometry.h>
 #include <quadrotor_msgs/PositionCommand.h>
 #include <geometry_msgs/Vector3.h>
+#include <drone_detect_lidar/DriftCorrection.h>
 
 #include "formation_utils.h"
 #include "message_utils.h"
@@ -62,6 +63,9 @@ ros::Subscriber nei_state_sub[MAX_UAV_NUM+1];
 // 漂移补偿订阅
 ros::Subscriber tree_drift_sub[MAX_UAV_NUM+1];
 
+// 漂移修正诊断发布
+ros::Publisher drift_correction_pub[MAX_UAV_NUM+1];
+
 // 发布
 ros::Publisher setpoint_raw_local_pub;
 ros::Publisher setpoint_raw_attitude_pub;
@@ -84,6 +88,7 @@ float r = 0.5;
 // 漂移补偿
 Eigen::Vector3d drift_nei[MAX_UAV_NUM+1];                   // EMA 滤波后的漂移量 (dx, dy, yaw)
 Eigen::Vector3d drift_raw_nei[MAX_UAV_NUM+1];               // 原始漂移量（用于异常值检测）
+Eigen::Vector3d pos_nei_raw[MAX_UAV_NUM+1];                  // 纠正前的邻居位置（诊断用）
 ros::Time drift_timestamp[MAX_UAV_NUM+1];                   // 漂移量时间戳
 bool enable_drift_correction;                               // 总开关
 double ema_alpha;                                           // EMA 滤波系数
@@ -240,6 +245,7 @@ void init(ros::NodeHandle &nh)
     for (int i = 0; i <= MAX_UAV_NUM; i++) {
         drift_nei[i].setZero();
         drift_raw_nei[i].setZero();
+        pos_nei_raw[i].setZero();
         drift_timestamp[i] = ros::Time(0);
     }
 }
@@ -320,6 +326,9 @@ void nei_state_cb(const prometheus_msgs::DroneState::ConstPtr& msg, int nei_id)
     pos_nei[nei_id]  = Eigen::Vector3d(msg->position[0], msg->position[1], msg->position[2]);
     vel_nei[nei_id]  = Eigen::Vector3d(msg->velocity[0], msg->velocity[1], msg->velocity[2]);
 
+    // 保存纠正前的位置（诊断用）
+    pos_nei_raw[nei_id] = pos_nei[nei_id];
+
     // 应用漂移修正
     drift_correct_pos_nei(nei_id);
 }
@@ -371,12 +380,30 @@ void drift_correct_pos_nei(int nei_id)
     double nx = pos_nei[nei_id].x();
     double ny = pos_nei[nei_id].y();
 
-    // 2D 刚体变换修正: pos_corrected = R(-yaw) · (pos - t)
+    // 2D 刚体变换修正: pos_corrected = R(yaw) · pos + t
     double c = cos(yaw);
     double s = sin(yaw);
-    pos_nei[nei_id].x() =  c * (nx - dx) + s * (ny - dy);
-    pos_nei[nei_id].y() = -s * (nx - dx) + c * (ny - dy);
+    pos_nei[nei_id].x() =  c * nx - s * ny + dx;
+    pos_nei[nei_id].y() =  s * nx + c * ny + dy;
     // Z 不修正
+
+    // 发布诊断消息
+    if (drift_correction_pub[nei_id].getNumSubscribers() > 0) {
+        drone_detect_lidar::DriftCorrection diag;
+        diag.header.stamp = ros::Time::now();
+        diag.drone_id = nei_id;
+        diag.raw_x = pos_nei_raw[nei_id].x();
+        diag.raw_y = pos_nei_raw[nei_id].y();
+        diag.corrected_x = pos_nei[nei_id].x();
+        diag.corrected_y = pos_nei[nei_id].y();
+        diag.drift_dx = dx;
+        diag.drift_dy = dy;
+        diag.drift_yaw = yaw;
+        double age = drift_timestamp[nei_id].toSec() > 0
+            ? (ros::Time::now() - drift_timestamp[nei_id]).toSec() : -1.0;
+        diag.correction_age = age;
+        drift_correction_pub[nei_id].publish(diag);
+    }
 }
 
 int check_failsafe()

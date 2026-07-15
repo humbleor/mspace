@@ -19,6 +19,8 @@
   <build_export_depend>std_msgs</build_export_depend>
   <exec_depend>std_msgs</exec_depend>
 
+  <depend>drone_detect_lidar</depend>
+
 
 
 

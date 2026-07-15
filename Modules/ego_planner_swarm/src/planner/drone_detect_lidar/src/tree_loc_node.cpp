@@ -1,6 +1,7 @@
 #include <ros/ros.h>
 #include <geometry_msgs/Vector3.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <visualization_msgs/MarkerArray.h>
 #include <sensor_msgs/PointCloud2.h>
 #include <nav_msgs/Odometry.h>
 #include "drone_detect_lidar/TreeDetection.h"
@@ -43,7 +44,8 @@ class TreeLocNode {
 public:
   TreeLocNode(ros::NodeHandle& nh)
     : nh_(nh), has_self_trees_(false), has_neighbor_trees_(false),
-      has_self_odom_(false), has_neighbor_odom_(false), last_fitness_(1e6) {
+      has_self_odom_(false), has_neighbor_odom_(false), last_fitness_(1e6),
+      tri_frame_counter_(0) {
 
     loadParameters();
 
@@ -60,6 +62,7 @@ public:
     tree_relative_pose_pub_ = nh_.advertise<geometry_msgs::PoseStamped>("tree_relative_pose", 10);
     tree_relative_pose_msg_pub_ = nh_.advertise<drone_detect_lidar::TreeRelativePose>("tree_relative_pose_msg", 10);
     matched_tree_pairs_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("matched_tree_pairs", 10);
+    tri_descriptors_pub_ = nh_.advertise<visualization_msgs::MarkerArray>("tri_descriptors", 10);
 
     compute_timer_ = nh_.createTimer(ros::Duration(1.0 / compute_frequency_),
                                      &TreeLocNode::computeTimerCallback, this);
@@ -77,15 +80,19 @@ private:
   ros::Publisher tree_relative_pose_pub_;
   ros::Publisher tree_relative_pose_msg_pub_;
   ros::Publisher matched_tree_pairs_pub_;
+  ros::Publisher tri_descriptors_pub_;
   ros::Timer compute_timer_;
 
   int drone_id_;
   double compute_frequency_;
+  int tri_rebuild_interval_;
+  int tri_frame_counter_;
   double drone_dist_threshold_;
   int min_common_trees_;
   double max_translation_;
   double max_yaw_deg_;
   double max_match_residual_;
+  double max_centroid_dist_;
 
   // Triangle matching parameters (HashReg style)
   TriangleMatchConfig tri_config_;
@@ -102,11 +109,13 @@ private:
   void loadParameters() {
     nh_.param("drone_id", drone_id_, 0);
     nh_.param("compute_frequency", compute_frequency_, 5.0);
+    nh_.param("tri_rebuild_interval", tri_rebuild_interval_, 5);
     nh_.param("drone_dist_threshold", drone_dist_threshold_, 10.0);
     nh_.param("min_common_trees", min_common_trees_, 3);
     nh_.param("max_translation", max_translation_, 3.0);
     nh_.param("max_yaw_deg", max_yaw_deg_, 20.0);
     nh_.param("max_match_residual", max_match_residual_, 0.5);
+    nh_.param("max_centroid_dist", max_centroid_dist_, 3.0);
 
     nh_.param("triangle_min_side", tri_config_.triangle_min_side, tri_config_.triangle_min_side);
     nh_.param("triangle_max_side", tri_config_.triangle_max_side, tri_config_.triangle_max_side);
@@ -158,7 +167,7 @@ private:
     pcl::KdTreeFLANN<pcl::PointXYZ> kdtree;
     kdtree.setInputCloud(cloud);
 
-    const int K = std::min((int)N, 10);
+    const int K = std::min((int)N, 5);
 
     std::set<std::tuple<int,int,int>> seen;
 
@@ -254,10 +263,12 @@ private:
   }
 
   // ===== Voxel search round vectors =====
-  // Search ±voxel_radius bins in each dimension (bin = 1mm for edge length hash key).
-  // Forest uses ±8 bins (~±8m per edge); drone_detect_lidar uses ±5 (~±5m) to balance
-  // recall vs. search cost. 11^3 = 1331 voxels vs. original 27.
-  static const int kVoxelRadius = 3;
+  // Search ±voxel_radius bins in each dimension (bin = 10cm for edge length hash key).
+  // LiDAR tree detection has ~2-5cm position error per tree, which translates to
+  // several cm of triangle side length error.  10cm bins with ±2-bin search covers
+  // ±20cm of side-length variation — enough for viewpoint-dependent centroid drift.
+  // Hash table: 5³ = 125 voxels searched per neighbor triangle.
+  static const int kVoxelRadius = 2;
 
   std::vector<Eigen::Vector3i> getVoxelRound() {
     std::vector<Eigen::Vector3i> voxels;
@@ -270,15 +281,70 @@ private:
   }
 
   TriKey makeKey(double a, double b, double c) {
+    // 10cm bin granularity: round side length to nearest 0.1m.
+    // Together with kVoxelRadius=2, this ±2 bins (±20cm) covers
+    // the typical tree-position jitter observed across drone viewpoints.
     return std::make_tuple(
-      (int)std::round(a * 1000),
-      (int)std::round(b * 1000),
-      (int)std::round(c * 1000));
+      (int)std::round(a * 10),
+      (int)std::round(b * 10),
+      (int)std::round(c * 10));
   }
 
   double edgeDist(const Triangle2D& t1, const Triangle2D& t2) {
     double da = t1.a - t2.a, db = t1.b - t2.b, dc = t1.c - t2.c;
     return std::sqrt(da*da + db*db + dc*dc);
+  }
+
+  void publishTriDescriptors(
+      const std::vector<Triangle2D, Eigen::aligned_allocator<Triangle2D>>& self_tris,
+      const std::vector<Triangle2D, Eigen::aligned_allocator<Triangle2D>>& neighbor_tris,
+      const std::string& frame_id) {
+
+    visualization_msgs::MarkerArray markers;
+
+    // Clear previous markers
+    visualization_msgs::Marker clear;
+    clear.header.stamp = ros::Time::now();
+    clear.header.frame_id = frame_id;
+    clear.ns = "tri_descriptors";
+    clear.action = visualization_msgs::Marker::DELETEALL;
+    markers.markers.push_back(clear);
+
+    auto buildLineMarker = [&](const std::string& ns, int id,
+                               const std::vector<Triangle2D, Eigen::aligned_allocator<Triangle2D>>& tris,
+                               float r, float g, float b) {
+      visualization_msgs::Marker m;
+      m.header.stamp = ros::Time::now();
+      m.header.frame_id = frame_id;
+      m.ns = ns;
+      m.id = id;
+      m.type = visualization_msgs::Marker::LINE_LIST;
+      m.action = visualization_msgs::Marker::ADD;
+      m.pose.orientation.w = 1.0;
+      m.scale.x = 0.05;
+      m.color.r = r; m.color.g = g; m.color.b = b; m.color.a = 0.6;
+
+      size_t limit = std::min(tris.size(), (size_t)500);
+      for (size_t i = 0; i < limit; i++) {
+        geometry_msgs::Point pa, pb, pc;
+        pa.x = tris[i].A.x(); pa.y = tris[i].A.y(); pa.z = 0.0;
+        pb.x = tris[i].B.x(); pb.y = tris[i].B.y(); pb.z = 0.0;
+        pc.x = tris[i].C.x(); pc.y = tris[i].C.y(); pc.z = 0.0;
+        m.points.push_back(pa); m.points.push_back(pb);
+        m.points.push_back(pb); m.points.push_back(pc);
+        m.points.push_back(pc); m.points.push_back(pa);
+      }
+      return m;
+    };
+
+    markers.markers.push_back(
+        buildLineMarker("self_tris", 0, self_tris, 1.0f, 0.0f, 0.0f));
+    markers.markers.push_back(
+        buildLineMarker("neighbor_tris", 1, neighbor_tris, 0.0f, 1.0f, 0.0f));
+
+    if (!markers.markers[1].points.empty() || !markers.markers[0].points.empty()) {
+      tri_descriptors_pub_.publish(markers);
+    }
   }
 
   void computeTimerCallback(const ros::TimerEvent&) {
@@ -341,6 +407,26 @@ private:
     ROS_INFO("[TreeLocNode] Triangles: self=%zu, neighbor=%zu",
              self_tris.size(), neighbor_tris.size());
 
+    if (!self_tris.empty() && !neighbor_tris.empty()) {
+      ROS_INFO("[TreeLocNode] Self tri[0]: sides=(%.3f,%.3f,%.3f) center=(%.1f,%.1f)",
+               self_tris[0].a, self_tris[0].b, self_tris[0].c,
+               self_tris[0].center.x(), self_tris[0].center.y());
+      ROS_INFO("[TreeLocNode] Neighbor tri[0]: sides=(%.3f,%.3f,%.3f) center=(%.1f,%.1f)",
+               neighbor_tris[0].a, neighbor_tris[0].b, neighbor_tris[0].c,
+               neighbor_tris[0].center.x(), neighbor_tris[0].center.y());
+      ROS_INFO("[TreeLocNode] Self tree[0]: (%.1f,%.1f), Neighbor tree[0]: (%.1f,%.1f)",
+               self_trees[0].x, self_trees[0].y,
+               neighbor_trees[0].x, neighbor_trees[0].y);
+      ROS_INFO("[TreeLocNode] odom_self=(%.1f,%.1f) odom_neighbor=(%.1f,%.1f) drone_dist=%.1f",
+               p_self[0], p_self[1], p_neighbor[0], p_neighbor[1], drone_dist);
+    }
+
+    // Publish triangle descriptors every tri_rebuild_interval_ frames
+    if (tri_frame_counter_ % tri_rebuild_interval_ == 0) {
+      publishTriDescriptors(self_tris, neighbor_tris, self_odom_snap->header.frame_id);
+    }
+    tri_frame_counter_++;
+
     // 2b. Build hash table for self triangles
     std::unordered_map<TriKey, std::vector<int>, TriKeyHash> self_tri_map;
     for (size_t i = 0; i < self_tris.size(); i++) {
@@ -351,6 +437,10 @@ private:
     // 2b. Rough matching: neighbor triangles search in hash space
     auto voxel_round = getVoxelRound();
     std::vector<TriMatch> candidate_matches;
+
+    int hash_hits = 0;
+    int edge_pass = 0;
+    int centroid_pass = 0;
 
     for (size_t ni = 0; ni < neighbor_tris.size(); ni++) {
       TriKey key = makeKey(neighbor_tris[ni].a, neighbor_tris[ni].b, neighbor_tris[ni].c);
@@ -366,13 +456,12 @@ private:
         if (it == self_tri_map.end()) continue;
 
         for (int si : it->second) {
+          hash_hits++;
           if (edgeDist(self_tris[si], neighbor_tris[ni]) < dis_threshold) {
-            // Centroid distance filter (forest_loop_detector style):
-            // Both drones report trees in world frame, so matching triangles
-            // from the SAME trees should have nearly identical centroids.
-            // We use 3m as a conservative bound to account for detection noise.
+            edge_pass++;
             double centroid_dist = (self_tris[si].center - neighbor_tris[ni].center).norm();
-            if (centroid_dist > 3.0) continue;
+            if (centroid_dist > max_centroid_dist_) continue;
+            centroid_pass++;
 
             candidate_matches.push_back({si, (int)ni});
           }
@@ -380,12 +469,15 @@ private:
       }
     }
 
+    ROS_INFO("[TreeLocNode] Matching stats: hash_hits=%d, edge_pass=%d, centroid_pass=%d, candidates=%zu",
+             hash_hits, edge_pass, centroid_pass, candidate_matches.size());
+
     if (candidate_matches.empty()) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] No triangle matches found");
+      ROS_INFO_THROTTLE(2.0, "[TreeLocNode] No triangle matches found");
       return;
     }
 
-    ROS_DEBUG("[TreeLocNode] Candidate triangle pairs after centroid filter: %zu",
+    ROS_INFO("[TreeLocNode] Candidate triangle pairs after centroid filter: %zu",
               candidate_matches.size());
 
     // ===== Step 0b: Odometry-based relative pose prior =====
@@ -458,7 +550,7 @@ private:
     }
 
     if (best_vote < 3) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] Triangle vote too low: %d", best_vote);
+      ROS_INFO_THROTTLE(2.0, "[TreeLocNode] Triangle vote too low: %d", best_vote);
       return;
     }
 

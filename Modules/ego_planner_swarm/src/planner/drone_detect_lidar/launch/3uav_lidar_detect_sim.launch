@@ -94,6 +94,7 @@
       <arg name="enable_graph_opt" value="$(arg enable_graph_opt)"/>
       <arg name="anchor_drone_id" value="$(arg uav_id_1)"/>
       <arg name="enable_relay" value="false"/>
+      <arg name="uav_num" value="$(arg uav_num)"/>
     </include>
   </group>
 
@@ -218,8 +219,21 @@
   <node pkg="topic_tools" type="relay" name="uav1_to_uav3_tree_relay"
         args="/uav1/tree_detection /uav3/neighbor_tree_detection"/>
 
-  <!-- tree_graph_node 需要接收所有 UAV 的 TreeRelativePose -->
-  <!-- tree_loc_node 已发布到 /uav*/tree_relative_pose_msg，无需额外 relay -->
+  <!-- UAV2 ↔ UAV3: 互相接收 odom + tree_detection (用于 tree_loc_node B-C 配对) -->
+  <node pkg="topic_tools" type="relay" name="uav3_to_uav2_odom_relay"
+        args="/uav3/lidar_slam/odom /uav2/neighbor_odom"/>
+  <node pkg="topic_tools" type="relay" name="uav3_to_uav2_tree_relay"
+        args="/uav3/tree_detection /uav2/neighbor_tree_detection"/>
+  <node pkg="topic_tools" type="relay" name="uav2_to_uav3_odom_relay"
+        args="/uav2/lidar_slam/odom /uav3/neighbor_odom"/>
+  <node pkg="topic_tools" type="relay" name="uav2_to_uav3_tree_relay"
+        args="/uav2/tree_detection /uav3/neighbor_tree_detection"/>
+
+  <!-- tree_graph_node (UAV1) 需要接收所有 UAV 的 tree_relative_pose_msg -->
+  <node pkg="topic_tools" type="relay" name="uav2_to_uav1_pose_msg_relay"
+        args="/uav2/tree_relative_pose_msg /uav1/uav2_relative_pose_msg"/>
+  <node pkg="topic_tools" type="relay" name="uav3_to_uav1_pose_msg_relay"
+        args="/uav3/tree_relative_pose_msg /uav1/uav3_relative_pose_msg"/>
 
   <!-- ========================================================================
        6. RViz 可视化
