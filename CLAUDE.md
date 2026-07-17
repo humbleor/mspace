@@ -1,127 +1,129 @@
 # CLAUDE.md
 
-本文件为 Claude Code (claude.ai/code) 提供在此仓库中工作的指引。
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## 项目概述
 
-**Mspace** 是一个基于 ROS Noetic 的无人机自主飞行项目，集成了 **Fast-LIO2**（激光-惯性里程计）和 **EGO-Planner Swarm**（去中心化多机器人路径规划）。支持单机和蜂群（多 UAV）配置，适配 Livox Mid-360 和 Ouster 激光雷达。
+**Mspace** 是一个基于 ROS Noetic (Ubuntu 20.04) 的无人机自主飞行项目，集成 **Fast-LIO2**（激光-惯性里程计）和 **EGO-Planner Swarm**（去中心化多机路径规划）。支持单机和蜂群（多 UAV）配置，适配 Livox Mid-360 和 Ouster 激光雷达。
 
 ## 构建
 
-始终使用根目录下的 `./compile.sh` 构建整个项目：
+**前置条件：构建前必须先 source `livox_ros_driver2` 工作空间**（这是最常见的构建失败原因）：
+```bash
+source ~/workspace/ws_livox/devel/setup.bash
+```
 
+全量构建（始终在项目根目录）：
 ```bash
 ./compile.sh
 ```
 
-构建产物输出到**项目根目录**下的 `build/` 和 `devel/`，而不是各个模块内部：
-- `build/<module_name>/` — 编译中间文件
-- `devel/` — 共享开发空间，包含 `setup.bash`
+`compile.sh` 按顺序构建：mavros → msgs → fast_lio2 → ego_planner_swarm → swarm_control → realsense_ros。`msgs` 必须先于依赖自定义消息的模块构建。所有构建产物输出到**项目根目录**的 `build/<module>/` 和共享的 `devel/`，而不是各模块内部。
 
-单独重建某个模块（`compile.sh` 内部也是同样的命令）：
+单独重建某个模块（与 `compile.sh` 内部命令一致）：
 ```bash
 catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 ```
 
-启动前务必 source 项目根目录的 `devel/setup.bash`：
+运行任何节点前先 source 工作空间：
 ```bash
 source devel/setup.bash
 ```
 
+**本项目没有 lint、测试套件和 CI** — 通过 `./compile.sh` 构建并检查编译错误来验证改动。
+
+## 目录名 ≠ ROS 包名
+
+`roslaunch` / `rosrun` 使用**包名**而非目录名：
+
+| 目录 | ROS 包名 |
+|------|---------|
+| `Modules/fast_lio2/` | `fast_lio` |
+| `Modules/ego_planner_swarm/plan_manage/` | `ego_planner` |
+| `Modules/swarm_control/` | `prometheus_swarm_control` |
+| `Experiment/mavros/` | `mavros_bringup` |
+| `Simulation/mspace_drone/` | `mspace_drone` |
+
 ## 代码架构
 
-仓库代码组织在 `Modules/` 下，每个子目录是一个 catkin 包或工作空间：
-
 ### Modules/ego_planner_swarm — 核心规划与仿真
-最大的模块，fork 自 ZJU-FAST-Lab/ego-planner-swarm。包含：
+最大的模块，fork 自 ZJU-FAST-Lab/ego-planner-swarm。各 catkin 包**直接位于模块根目录下**（原 `src/planner/`、`src/uav_simulator/` 嵌套结构已扁平化）：
 
-- **src/planner/plan_manage** — 高层规划调度，launch 文件（`simple_run.launch`、`swarm.launch`、`single_run_in_sim.launch` 等），仿真器接线
-- **src/planner/plan_env** — 环境感知：`grid_map`（体素占据栅格）、`obj_predictor`（动态障碍物预测）、`raycast`（光线投射）
-- **src/planner/bspline_opt** — 轨迹优化：`UniformBSpline`、`BsplineOptimizer`（碰撞/平滑/可行性梯度下降优化）、`GradientDescentOptimizer`
-- **src/planner/path_searching** — `DynAStar`（运动学 A* 路径搜索）
-- **src/planner/traj_utils** — 轨迹工具函数
-- **src/planner/drone_detect** — 基于深度/相机数据的无人机检测
-- **src/planner/drone_detect_lidar** — 基于树干特征匹配的多机相对定位（森林场景）。高度裁剪 + PCA 线性度筛选树干 + 距离匹配 + 2D SVD 闭式解求 (dx, dy, yaw)，输出 `tree_pose_error` 话题
-- **src/planner/rosmsg_tcp_bridge** — 基于 TCP 的 ROS 消息桥接，用于蜂群通信
-- **src/uav_simulator/** — 仿真基础设施：
-  - `local_sensing` — 仿真深度相机 / 点云传感器（CPU/GPU 模式）
-  - `mockamap` — 程序化地图生成
-  - `fake_drone` — 轻量级运动学无人机模型（默认，低 CPU 占用）
-  - `so3_control` + `so3_quadrotor_simulator` — 完整 SO(3) 动力学仿真（可选，CPU 占用高）
-  - `map_generator` / `lidar_map_generator` — 测试地图生成器
-  - `Utils` — 通用仿真工具
+- **plan_manage** — 高层规划调度与 launch 文件（包名 `ego_planner`）
+  - `launch/` — 原始 ego-planner launch（`simple_run.launch`、`swarm.launch`、`simulator.xml`）
+  - `launch_new/` — **当前使用的 launch**：LiDAR/VIO 仿真变体（`1uav_mid360_sim.launch`、`1uav_os128_sim.launch`、`2uav/4uav/10uav_mid360_sim.launch`、`*_vio_sim.launch`）与真机入口 `real_ego_run.launch`
+- **plan_env** — 环境感知：`grid_map`（体素占据栅格）、`obj_predictor`（动态障碍物预测）、`raycast`
+- **bspline_opt** — B 样条轨迹优化（碰撞/平滑/可行性梯度下降优化）
+- **path_searching** — `DynAStar` 运动学 A* 路径搜索
+- **traj_utils** — 轨迹工具函数
+- **drone_detect** — 基于深度/相机数据的无人机互检
+- **drone_detect_lidar** — 森林场景树干特征多机相对定位（见下节）
+- **rosmsg_tcp_bridge** — 基于 TCP 的 ROS 消息桥接，用于蜂群通信
+- **uav_simulator/** — 仿真基础设施：`fake_drone`（默认，轻量运动学模型）、`local_sensing`（仿真深度/点云传感器，CPU/GPU 模式）、`lidar_map_generator` / `map_generator` / `mockamap`（地图生成）、`so3_control` + `so3_quadrotor_simulator`（完整 SO(3) 动力学，可选，CPU 占用高）
 
-### Modules/fast_lio2 — 激光-惯性里程计
-包含 `FAST_LIO` — 紧耦合激光-惯性里程计系统：
-- 核心文件：`drone_laserMapping.cpp`（主建图节点）、`preprocess.cpp`（点云预处理）、`IMU_Processing.hpp`（IMU 积分）
-- 配置文件在 `config/`，launch 文件在 `launch/`
+### drone_detect_lidar — 树干匹配相对定位
+三个节点组成的流水线（详见其 README）：
+1. `tree_detector_node` — 点云 → 体素降采样 → 高度裁剪 [0.3, 3.0]m → PatchWork++ 地面剔除 → 欧氏聚类 → PCA 多条件筛选 → 树干位置（质心 XY + 最低点 Z），广播 `TreeDetection` 消息
+2. `tree_loc_node` — 三角形哈希匹配（HashReg 思想）+ 投票验证 + 2D SVD 闭式解求 (dx, dy, yaw)，发布 `tree_pose_error` / `TreeRelativePose`
+3. `tree_graph_node` — anchor 机上的 GTSAM 因子图优化，发布 `TreeRelativePoseOptimized`。**GTSAM 是可选依赖**：未安装时此节点自动跳过编译（CMake `find_package(GTSAM QUIET)`）
 
-### Modules/swarm_control — 真实蜂群执行
-用于物理硬件上部署蜂群任务的节点：
-- `swarm_terminal_control.cpp` — 终端/CLI 任务控制接口
-- `swarm_controller.cpp` — 高层蜂群协调
-- `swarm_formation_control.cpp` — 编队保持
-- `swarm_estimator.cpp` — 蜂群成员状态估计
-- `swarm_ground_station.cpp` — 地面站 UI/遥测
-- `ego_traj_to_cmd.cpp` — 将 EGO-Planner 轨迹转换为 MAVROS 指令
-
-### Modules/common/msgs — 共享消息定义
-跨模块使用的自定义 ROS msg/action 定义。
-
-### Modules/realsense_ros — Intel RealSense 驱动
-Fork 的 RealSense ROS 驱动，支持 D435/D435i 相机。
-
-### Experiment/mavros — MAVROS 集成
-自定义 MAVROS launch/配置，用于真实环境部署。
-
-## 启动
-
-### 仿真
+漂移评估流水线（注入漂移 → 仿真 → 精度评估，结果输出到 `Scripts/drift_eval_<时间戳>/`）：
 ```bash
-# 单机
-roslaunch ego_planner simple_run.launch
-
-# 蜂群（4 架 UAV）
-roslaunch ego_planner swarm.launch
+cd Modules/ego_planner_swarm/drone_detect_lidar/Scripts
+./run_tree_drift_eval.sh [时长] [uav1_dx] [uav1_dy] [uav1_yaw°] [uav2_dx] [uav2_dy] [uav2_yaw°]
+# 示例：仅 UAV2 漂移，UAV1 为 anchor
+./run_tree_drift_eval.sh 120 0 0 0 0.5 0.3 5.0
 ```
 
-### 真机（单机，Livox Mid-360）
-```bash
-./ego_fastlio2_one_livox.sh
-```
+### Modules/fast_lio2 — 激光-惯性里程计（包名 `fast_lio`）
+单一 catkin 包：`src/drone_laserMapping.cpp`（主建图节点）、`src/preprocess.cpp`（点云预处理）、`src/IMU_Processing.hpp`（IMU 积分）。`include/ikd-Tree` 是 git submodule。每种雷达对应一份 `config/*.yaml`（`mid360.yaml`、`ouster128.yaml` 等）和 `launch/mapping_*.launch`。
 
-### 真机（单机，Ouster）
-```bash
-./ego_fastlio2_ouster.sh
-```
+### Modules/swarm_control — 真机蜂群执行（包名 `prometheus_swarm_control`）
+物理硬件上的蜂群任务节点：`swarm_terminal_control`（终端任务控制）、`swarm_controller`（高层协调）、`swarm_formation_control`（编队）、`swarm_estimator`（状态估计）、`swarm_ground_station`（地面站）、`ego_traj_to_cmd`（EGO 轨迹 → MAVROS 指令）。
 
-### 真机（蜂群）
-主机 1：
-```bash
-./ego_fastlio2_swarm_mavros.sh
-./ego_fastlio2_swarm_uav1.sh
-```
-主机 2：
-```bash
-./ego_fastlio2_swarm_uav2.sh
-```
+### 其他模块
+- **Modules/common/msgs** — 跨模块共享的自定义 msg/action（`DroneState`、`SwarmCommand`、`ControlCommand`、`Formation` 等）
+- **Modules/realsense_ros** — RealSense D435/D435i 驱动 fork（真机录制用）
+- **Experiment/mavros** — 真机部署的 MAVROS launch/配置（包名 `mavros_bringup`，真机脚本依赖它）
+- **Simulation/mspace_drone** — PX4 SITL + Gazebo 仿真集成（`sitl_ego_planner.launch`、`sitl_ego_planner_mid360.launch`）。**不在 `compile.sh` 构建列表中**；需先自行搭建 PX4 仿真环境并运行 `Simulation/shell/gazebo_setup.bash`，依赖 NLopt
 
-## 脚本
-- `Scripts/visualize_waypoints.py` — 航点可视化
-- `Scripts/analyze_flight_stability.py` — 飞行稳定性分析
-- `Scripts/analyzer_ego_stability.py` — EGO 规划器稳定性分析
+## 运行
+
+### 仿真（先 `source devel/setup.bash`）
+```bash
+roslaunch ego_planner 1uav_mid360_sim.launch    # 单机，Livox Mid-360
+roslaunch ego_planner 1uav_os128_sim.launch     # 单机，Ouster OS128
+roslaunch ego_planner 4uav_mid360_sim.launch    # 4 机蜂群（另有 2uav/10uav/vio 变体）
+roslaunch drone_detect_lidar 2uav_lidar_detect_sim.launch   # 双机树干互定位（3uav 版含因子图优化）
+```
+LiDAR 仿真从 `~/bagfiles/resource/` 加载 PCD 地图（仓库外资源，路径由 launch 文件的 `map_name` 参数指定）。
+
+### 真机（gnome-terminal 多标签脚本，会同时 source `ws_livox` 和本工作空间）
+```bash
+./ego_fastlio2_one_livox.sh       # 单机 Livox
+./ego_fastlio2_ouster.sh          # 单机 Ouster
+./ego_fastlio2_swarm_mavros.sh    # 蜂群主机1：MAVROS
+./ego_fastlio2_swarm_uav1.sh      # 蜂群主机1：UAV1 规划
+./ego_fastlio2_swarm_uav2.sh      # 蜂群主机2：UAV2
+./topiclistOS0.sh                 # rosbag 录制点云/相机话题
+```
+真实蜂群是多主机部署，各机通过 MAVROS/ROS 网络通信。
+
+## 分析脚本（Scripts/）
+- `visualize_waypoints.py` — 航点可视化
+- `analyze_flight_stability.py` / `analyzer_ego_stability.py` — 飞行/EGO 规划器稳定性分析
+- `analyze_tree_pose_error.py` — `tree_pose_error` 话题数值统计
 
 ## 关键依赖
-- ROS Noetic, Ubuntu 20.04
-- PCL >= 1.10, Eigen >= 3.3.4
-- `libarmadillo-dev`（ego_planner_swarm 必需）
-- `livox_ros_driver2`（构建前必须先 source）
-- `librealsense`（RealSense 相机用）
+- ROS Noetic、Ubuntu 20.04、PCL >= 1.10、Eigen >= 3.3.4
+- `livox_ros_driver2`（构建前必须 source）、`libarmadillo-dev`（ego_planner_swarm 必需）
+- GTSAM（可选，仅 `tree_graph_node` 需要）
+- `librealsense`（RealSense 相机用）；PX4 + Gazebo（仅 `Simulation/` SITL 用）
 
 ## 注意事项
-- 仿真默认使用 `fake_drone`（运动学模型，低 CPU 占用）。如需启用完整 SO(3) 动力学仿真，编辑 `src/planner/plan_manage/launch/simulator.xml`。
-- `local_sensing` 支持可选的 CUDA 加速 — 在其 CMakeLists.txt 中设置 `ENABLE_CUDA true` 可启用 GPU 深度图渲染。
-- CPU 频率调节会影响规划器性能 — 将 governor 设为 `performance` 以获得一致的计时表现。
+- 仿真默认使用 `fake_drone` 运动学模型。如需完整 SO(3) 动力学，编辑 `plan_manage/launch/simulator.xml`
+- `local_sensing` 支持可选 CUDA 加速 — 在其 CMakeLists.txt 中设置 `ENABLE_CUDA true` 启用 GPU 深度图渲染
+- CPU 频率调节影响规划器性能 — 将 governor 设为 `performance` 以获得一致的计时表现
 
 # CLAUDE.md
 

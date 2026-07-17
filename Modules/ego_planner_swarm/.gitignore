@@ -1,4 +1,4 @@
-.vscode/settings.json
+.vscode/
 .catkin_workspace
 build/
 devel/
@@ -7,5 +7,5 @@ src/CMakeLists.txt
 benchmark_haha.zip
 rebound_planner_BB.zip
 
-src/uav_simulator/lidar_map_generator/resource
-src/planner/drone_detect_lidar/Scripts/drift_eval_*
+uav_simulator/lidar_map_generator/resource
+drone_detect_lidar/Scripts/drift_eval_*
