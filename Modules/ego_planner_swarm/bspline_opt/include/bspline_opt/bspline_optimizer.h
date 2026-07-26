@@ -102,6 +102,7 @@ namespace ego_planner
     void setControlPoints(const Eigen::MatrixXd &points);
     void setBsplineInterval(const double &ts);
     void setSwarmTrajs(SwarmTrajData *swarm_trajs_ptr);
+    void setSwarmTrajsSnapshot(const SwarmTrajData &snapshot);
     void setDroneId(const int drone_id);
 
     // optional inputs
@@ -130,6 +131,7 @@ namespace ego_planner
     GridMap::Ptr grid_map_;
     fast_planner::ObjPredictor::Ptr moving_objs_;
     SwarmTrajData *swarm_trajs_{NULL}; // Can not use shared_ptr and no need to free
+    SwarmTrajData swarm_trajs_snapshot_; // Thread-safe snapshot for optimization
     int drone_id_;
 
     enum FORCE_STOP_OPTIMIZE_TYPE

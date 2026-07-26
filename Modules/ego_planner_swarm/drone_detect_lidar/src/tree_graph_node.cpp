@@ -62,6 +62,14 @@ public:
              anchor_drone_id_, optimize_freq_, subs_.size());
   }
 
+  ~TreeGraphNode() {
+    optimize_timer_.stop();
+    for (auto& sub : subs_) {
+      sub.shutdown();
+    }
+    boost::mutex::scoped_lock lock(mutex_);
+  }
+
 private:
   struct AvgMeasurement {
     uint32_t src, dst;

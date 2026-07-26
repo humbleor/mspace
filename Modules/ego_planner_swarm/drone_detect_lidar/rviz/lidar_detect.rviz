@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /UAV11
         - /UAV21
-      Splitter Ratio: 0.6058823466300964
+      Splitter Ratio: 0.48591548204421997
     Tree Height: 696
   - Class: rviz/Views
     Expanded:
@@ -140,7 +140,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.009999999776482582
           Style: Points
-          Topic: /uav1/pcl_render_node/cloud
+          Topic: /uav_1_ego_planner_node/grid_map/occupancy_inflate
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
@@ -237,7 +237,8 @@ Visualization Manager:
           Marker Topic: /uav1/tri_descriptors
           Name: UAV1 Triangles
           Namespaces:
-            {}
+            neighbor_tris: true
+            self_tris: true
           Queue Size: 100
           Value: true
         - Class: rviz/Marker
@@ -265,7 +266,7 @@ Visualization Manager:
           Marker Topic: /uav_2_ego_planner_node/global_list
           Name: Global List
           Namespaces:
-            {}
+            "": true
           Queue Size: 100
           Value: true
         - Class: rviz/Marker
@@ -299,7 +300,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.009999999776482582
           Style: Points
-          Topic: /uav2/pcl_render_node/cloud
+          Topic: /uav_2_ego_planner_node/grid_map/occupancy_inflate
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
@@ -396,7 +397,8 @@ Visualization Manager:
           Marker Topic: /uav2/tri_descriptors
           Name: UAV2 Triangles
           Namespaces:
-            {}
+            neighbor_tris: true
+            self_tris: true
           Queue Size: 100
           Value: true
         - Class: rviz/Marker
@@ -432,7 +434,7 @@ Visualization Manager:
           Marker Topic: /uav_3_ego_planner_node/goal_point
           Name: Goal Point
           Namespaces:
-            "": true
+            {}
           Queue Size: 100
           Value: true
         - Alpha: 0.800000011920929
@@ -458,7 +460,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.009999999776482582
           Style: Points
-          Topic: /uav3/pcl_render_node/cloud
+          Topic: /uav_3_ego_planner_node/grid_map/occupancy_inflate
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true
@@ -555,8 +557,7 @@ Visualization Manager:
           Marker Topic: /uav3/tri_descriptors
           Name: UAV3 Triangles
           Namespaces:
-            neighbor_tris: true
-            self_tris: true
+            {}
           Queue Size: 100
           Value: true
         - Class: rviz/Marker
@@ -564,7 +565,7 @@ Visualization Manager:
           Marker Topic: /uav_3_odom_visualization/robot
           Name: UAV3 Robot
           Namespaces:
-            mesh: true
+            {}
           Queue Size: 100
           Value: true
         - Class: rviz/Marker
@@ -572,7 +573,7 @@ Visualization Manager:
           Marker Topic: /uav_3_odom_visualization/drone_id
           Name: UAV3 DroneID
           Namespaces:
-            "": true
+            {}
           Queue Size: 100
           Value: true
       Enabled: true
@@ -600,7 +601,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 55.63132095336914
+      Distance: 45.52050018310547
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -608,17 +609,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 11.082938194274902
-        Y: 0.6583384275436401
-        Z: 3.1332621574401855
+        X: 9.98691177368164
+        Y: 9.776023864746094
+        Z: 7.142219066619873
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9247969388961792
+      Pitch: 1.0497967004776
       Target Frame: world
-      Yaw: 3.1631715297698975
+      Yaw: 3.1781625747680664
     Saved: ~
 Window Geometry:
   Displays:
@@ -626,9 +627,9 @@ Window Geometry:
   Height: 1495
   Hide Left Dock: false
   Hide Right Dock: false
-  QMainWindow State: 000000ff00000000fd00000001000000000000015600000581fc0200000002fb000000100044006900730070006c006100790073010000003b00000339000000c700fffffffb0000000a00560069006500770073010000037a00000242000000a000ffffff000008980000058100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd0000000100000000000001ac00000581fc0200000002fb000000100044006900730070006c006100790073010000003b00000339000000c700fffffffb0000000a00560069006500770073010000037a00000242000000a000ffffff000008420000058100000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Views:
     collapsed: false
   Width: 2548
-  X: 0
-  Y: 0
+  X: -32
+  Y: -32

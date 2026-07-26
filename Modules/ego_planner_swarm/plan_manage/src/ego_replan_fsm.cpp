@@ -678,62 +678,66 @@ namespace ego_planner
       return;
     }
 
-    /* Fill up the buffer */
-    if (planner_manager_->swarm_trajs_buf_.size() <= id)
     {
-      for (size_t i = planner_manager_->swarm_trajs_buf_.size(); i <= id; i++)
+      std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+
+      /* Fill up the buffer */
+      if (planner_manager_->swarm_trajs_buf_.size() <= id)
       {
-        OneTrajDataOfSwarm blank;
-        blank.drone_id = -1;
-        planner_manager_->swarm_trajs_buf_.push_back(blank);
+        for (size_t i = planner_manager_->swarm_trajs_buf_.size(); i <= id; i++)
+        {
+          OneTrajDataOfSwarm blank;
+          blank.drone_id = -1;
+          planner_manager_->swarm_trajs_buf_.push_back(blank);
+        }
       }
+
+      /* Test distance to the agent */
+      Eigen::Vector3d cp0(msg->pos_pts[0].x, msg->pos_pts[0].y, msg->pos_pts[0].z);
+      Eigen::Vector3d cp1(msg->pos_pts[1].x, msg->pos_pts[1].y, msg->pos_pts[1].z);
+      Eigen::Vector3d cp2(msg->pos_pts[2].x, msg->pos_pts[2].y, msg->pos_pts[2].z);
+      Eigen::Vector3d swarm_start_pt = (cp0 + 4 * cp1 + cp2) / 6;
+      if ((swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
+      {
+        planner_manager_->swarm_trajs_buf_[id].drone_id = -1;
+        return; // if the current drone is too far to the received agent.
+      }
+
+      /* Store data */
+      Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
+      Eigen::VectorXd knots(msg->knots.size());
+      for (size_t j = 0; j < msg->knots.size(); ++j)
+      {
+        knots(j) = msg->knots[j];
+      }
+      for (size_t j = 0; j < msg->pos_pts.size(); ++j)
+      {
+        pos_pts(0, j) = msg->pos_pts[j].x;
+        pos_pts(1, j) = msg->pos_pts[j].y;
+        pos_pts(2, j) = msg->pos_pts[j].z;
+      }
+
+      planner_manager_->swarm_trajs_buf_[id].drone_id = id;
+
+      if (msg->order % 2)
+      {
+        double cutback = (double)msg->order / 2 + 1.5;
+        planner_manager_->swarm_trajs_buf_[id].duration_ = msg->knots[msg->knots.size() - ceil(cutback)];
+      }
+      else
+      {
+        double cutback = (double)msg->order / 2 + 1.5;
+        planner_manager_->swarm_trajs_buf_[id].duration_ = (msg->knots[msg->knots.size() - floor(cutback)] + msg->knots[msg->knots.size() - ceil(cutback)]) / 2;
+      }
+
+      UniformBspline pos_traj(pos_pts, msg->order, msg->knots[1] - msg->knots[0]);
+      pos_traj.setKnot(knots);
+      planner_manager_->swarm_trajs_buf_[id].position_traj_ = pos_traj;
+
+      planner_manager_->swarm_trajs_buf_[id].start_pos_ = planner_manager_->swarm_trajs_buf_[id].position_traj_.evaluateDeBoorT(0);
+
+      planner_manager_->swarm_trajs_buf_[id].start_time_ = msg->start_time;
     }
-
-    /* Test distance to the agent */
-    Eigen::Vector3d cp0(msg->pos_pts[0].x, msg->pos_pts[0].y, msg->pos_pts[0].z);
-    Eigen::Vector3d cp1(msg->pos_pts[1].x, msg->pos_pts[1].y, msg->pos_pts[1].z);
-    Eigen::Vector3d cp2(msg->pos_pts[2].x, msg->pos_pts[2].y, msg->pos_pts[2].z);
-    Eigen::Vector3d swarm_start_pt = (cp0 + 4 * cp1 + cp2) / 6;
-    if ((swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
-    {
-      planner_manager_->swarm_trajs_buf_[id].drone_id = -1;
-      return; // if the current drone is too far to the received agent.
-    }
-
-    /* Store data */
-    Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
-    Eigen::VectorXd knots(msg->knots.size());
-    for (size_t j = 0; j < msg->knots.size(); ++j)
-    {
-      knots(j) = msg->knots[j];
-    }
-    for (size_t j = 0; j < msg->pos_pts.size(); ++j)
-    {
-      pos_pts(0, j) = msg->pos_pts[j].x;
-      pos_pts(1, j) = msg->pos_pts[j].y;
-      pos_pts(2, j) = msg->pos_pts[j].z;
-    }
-
-    planner_manager_->swarm_trajs_buf_[id].drone_id = id;
-
-    if (msg->order % 2)
-    {
-      double cutback = (double)msg->order / 2 + 1.5;
-      planner_manager_->swarm_trajs_buf_[id].duration_ = msg->knots[msg->knots.size() - ceil(cutback)];
-    }
-    else
-    {
-      double cutback = (double)msg->order / 2 + 1.5;
-      planner_manager_->swarm_trajs_buf_[id].duration_ = (msg->knots[msg->knots.size() - floor(cutback)] + msg->knots[msg->knots.size() - ceil(cutback)]) / 2;
-    }
-
-    UniformBspline pos_traj(pos_pts, msg->order, msg->knots[1] - msg->knots[0]);
-    pos_traj.setKnot(knots);
-    planner_manager_->swarm_trajs_buf_[id].position_traj_ = pos_traj;
-
-    planner_manager_->swarm_trajs_buf_[id].start_pos_ = planner_manager_->swarm_trajs_buf_[id].position_traj_.evaluateDeBoorT(0);
-
-    planner_manager_->swarm_trajs_buf_[id].start_time_ = msg->start_time;
     // planner_manager_->swarm_trajs_buf_[id].start_time_ = ros::Time::now(); // Un-reliable time sync
 
     /* Check Collision */
@@ -765,68 +769,72 @@ namespace ego_planner
     }
 
     // Step 1. receive the trajectories
-    planner_manager_->swarm_trajs_buf_.clear();
-    planner_manager_->swarm_trajs_buf_.resize(msg->traj.size());
-
-    for (size_t i = 0; i < msg->traj.size(); i++)
     {
-      if (msg->traj[i].pos_pts.size() == 0)
+      std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+
+      planner_manager_->swarm_trajs_buf_.clear();
+      planner_manager_->swarm_trajs_buf_.resize(msg->traj.size());
+
+      for (size_t i = 0; i < msg->traj.size(); i++)
       {
-        planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
-        continue;
+        if (msg->traj[i].pos_pts.size() == 0)
+        {
+          planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
+          continue;
+        }
+
+        if (msg->traj[i].order != 3) // only support B-spline order equals 3.
+        {
+          ROS_ERROR("Only support B-spline order equals 3.");
+          planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
+          continue;
+        }
+
+        Eigen::Vector3d cp0(msg->traj[i].pos_pts[0].x, msg->traj[i].pos_pts[0].y, msg->traj[i].pos_pts[0].z);
+        Eigen::Vector3d cp1(msg->traj[i].pos_pts[1].x, msg->traj[i].pos_pts[1].y, msg->traj[i].pos_pts[1].z);
+        Eigen::Vector3d cp2(msg->traj[i].pos_pts[2].x, msg->traj[i].pos_pts[2].y, msg->traj[i].pos_pts[2].z);
+        Eigen::Vector3d swarm_start_pt = (cp0 + 4 * cp1 + cp2) / 6;
+        if ((swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
+        {
+          planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
+          continue;
+        }
+
+        Eigen::MatrixXd pos_pts(3, msg->traj[i].pos_pts.size());
+        Eigen::VectorXd knots(msg->traj[i].knots.size());
+        for (size_t j = 0; j < msg->traj[i].knots.size(); ++j)
+        {
+          knots(j) = msg->traj[i].knots[j];
+        }
+        for (size_t j = 0; j < msg->traj[i].pos_pts.size(); ++j)
+        {
+          pos_pts(0, j) = msg->traj[i].pos_pts[j].x;
+          pos_pts(1, j) = msg->traj[i].pos_pts[j].y;
+          pos_pts(2, j) = msg->traj[i].pos_pts[j].z;
+        }
+
+        planner_manager_->swarm_trajs_buf_[i].drone_id = i;
+
+        if (msg->traj[i].order % 2)
+        {
+          double cutback = (double)msg->traj[i].order / 2 + 1.5;
+          planner_manager_->swarm_trajs_buf_[i].duration_ = msg->traj[i].knots[msg->traj[i].knots.size() - ceil(cutback)];
+        }
+        else
+        {
+          double cutback = (double)msg->traj[i].order / 2 + 1.5;
+          planner_manager_->swarm_trajs_buf_[i].duration_ = (msg->traj[i].knots[msg->traj[i].knots.size() - floor(cutback)] + msg->traj[i].knots[msg->traj[i].knots.size() - ceil(cutback)]) / 2;
+        }
+
+        // planner_manager_->swarm_trajs_buf_[i].position_traj_ =
+        UniformBspline pos_traj(pos_pts, msg->traj[i].order, msg->traj[i].knots[1] - msg->traj[i].knots[0]);
+        pos_traj.setKnot(knots);
+        planner_manager_->swarm_trajs_buf_[i].position_traj_ = pos_traj;
+
+        planner_manager_->swarm_trajs_buf_[i].start_pos_ = planner_manager_->swarm_trajs_buf_[i].position_traj_.evaluateDeBoorT(0);
+
+        planner_manager_->swarm_trajs_buf_[i].start_time_ = msg->traj[i].start_time;
       }
-
-      if (msg->traj[i].order != 3) // only support B-spline order equals 3.
-      {
-        ROS_ERROR("Only support B-spline order equals 3.");
-        planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
-        continue;
-      }
-
-      Eigen::Vector3d cp0(msg->traj[i].pos_pts[0].x, msg->traj[i].pos_pts[0].y, msg->traj[i].pos_pts[0].z);
-      Eigen::Vector3d cp1(msg->traj[i].pos_pts[1].x, msg->traj[i].pos_pts[1].y, msg->traj[i].pos_pts[1].z);
-      Eigen::Vector3d cp2(msg->traj[i].pos_pts[2].x, msg->traj[i].pos_pts[2].y, msg->traj[i].pos_pts[2].z);
-      Eigen::Vector3d swarm_start_pt = (cp0 + 4 * cp1 + cp2) / 6;
-      if ((swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
-      {
-        planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
-        continue;
-      }
-
-      Eigen::MatrixXd pos_pts(3, msg->traj[i].pos_pts.size());
-      Eigen::VectorXd knots(msg->traj[i].knots.size());
-      for (size_t j = 0; j < msg->traj[i].knots.size(); ++j)
-      {
-        knots(j) = msg->traj[i].knots[j];
-      }
-      for (size_t j = 0; j < msg->traj[i].pos_pts.size(); ++j)
-      {
-        pos_pts(0, j) = msg->traj[i].pos_pts[j].x;
-        pos_pts(1, j) = msg->traj[i].pos_pts[j].y;
-        pos_pts(2, j) = msg->traj[i].pos_pts[j].z;
-      }
-
-      planner_manager_->swarm_trajs_buf_[i].drone_id = i;
-
-      if (msg->traj[i].order % 2)
-      {
-        double cutback = (double)msg->traj[i].order / 2 + 1.5;
-        planner_manager_->swarm_trajs_buf_[i].duration_ = msg->traj[i].knots[msg->traj[i].knots.size() - ceil(cutback)];
-      }
-      else
-      {
-        double cutback = (double)msg->traj[i].order / 2 + 1.5;
-        planner_manager_->swarm_trajs_buf_[i].duration_ = (msg->traj[i].knots[msg->traj[i].knots.size() - floor(cutback)] + msg->traj[i].knots[msg->traj[i].knots.size() - ceil(cutback)]) / 2;
-      }
-
-      // planner_manager_->swarm_trajs_buf_[i].position_traj_ =
-      UniformBspline pos_traj(pos_pts, msg->traj[i].order, msg->traj[i].knots[1] - msg->traj[i].knots[0]);
-      pos_traj.setKnot(knots);
-      planner_manager_->swarm_trajs_buf_[i].position_traj_ = pos_traj;
-
-      planner_manager_->swarm_trajs_buf_[i].start_pos_ = planner_manager_->swarm_trajs_buf_[i].position_traj_.evaluateDeBoorT(0);
-
-      planner_manager_->swarm_trajs_buf_[i].start_time_ = msg->traj[i].start_time;
     }
 
     have_recv_pre_agent_ = true;
@@ -1166,6 +1174,13 @@ namespace ego_planner
       }
     }
 
+    /* ---------- snapshot swarm trajectories under lock ---------- */
+    SwarmTrajData swarm_trajs_snapshot;
+    {
+      std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+      swarm_trajs_snapshot = planner_manager_->swarm_trajs_buf_;
+    }
+
     /* ---------- check trajectory ---------- */
     constexpr double time_step = 0.01;
     double t_cur = (ros::Time::now() - info->start_time_).toSec();
@@ -1181,15 +1196,15 @@ namespace ego_planner
       bool occ = false;
       occ |= map->getInflateOccupancy(info->position_traj_.evaluateDeBoorT(t));
 
-      for (size_t id = 0; id < planner_manager_->swarm_trajs_buf_.size(); id++)
+      for (size_t id = 0; id < swarm_trajs_snapshot.size(); id++)
       {
-        if ((planner_manager_->swarm_trajs_buf_.at(id).drone_id != (int)id) || (planner_manager_->swarm_trajs_buf_.at(id).drone_id == planner_manager_->pp_.drone_id))
+        if ((swarm_trajs_snapshot.at(id).drone_id != (int)id) || (swarm_trajs_snapshot.at(id).drone_id == planner_manager_->pp_.drone_id))
         {
           continue;
         }
 
-        double t_X = t_cur_global - planner_manager_->swarm_trajs_buf_.at(id).start_time_.toSec();
-        double neighbor_dur = planner_manager_->swarm_trajs_buf_.at(id).duration_;
+        double t_X = t_cur_global - swarm_trajs_snapshot.at(id).start_time_.toSec();
+        double neighbor_dur = swarm_trajs_snapshot.at(id).duration_;
         // Skip neighbor trajectories that have already expired to avoid
         // false collision detection when neighbor has finished its trajectory.
         if (t_X < 0.0 || t_X > neighbor_dur)
@@ -1197,7 +1212,7 @@ namespace ego_planner
           continue;
         }
 
-        Eigen::Vector3d swarm_pridicted = planner_manager_->swarm_trajs_buf_.at(id).position_traj_.evaluateDeBoorT(t_X);
+        Eigen::Vector3d swarm_pridicted = swarm_trajs_snapshot.at(id).position_traj_.evaluateDeBoorT(t_X);
         double dist = (p_cur - swarm_pridicted).norm();
 
         if (dist < CLEARANCE)

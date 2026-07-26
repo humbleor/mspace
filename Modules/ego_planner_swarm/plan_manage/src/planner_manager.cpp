@@ -232,6 +232,11 @@ namespace ego_planner
     t_start = ros::Time::now();
 
     /*** STEP 2: OPTIMIZE ***/
+    {
+      std::lock_guard<std::mutex> lock(swarm_traj_mutex_);
+      bspline_optimizer_->setSwarmTrajsSnapshot(swarm_trajs_buf_);
+    }
+
     bool flag_step_1_success = false;
     vector<vector<Eigen::Vector3d>> vis_trajs;
 
@@ -350,15 +355,21 @@ namespace ego_planner
     if (local_data_.start_time_.toSec() < 1e9) // It means my first planning has not started
       return false;
 
+    SwarmTrajData swarm_trajs_snapshot;
+    {
+      std::lock_guard<std::mutex> lock(swarm_traj_mutex_);
+      swarm_trajs_snapshot = swarm_trajs_buf_;
+    }
+
     double my_traj_start_time = local_data_.start_time_.toSec();
-    double other_traj_start_time = swarm_trajs_buf_[drone_id].start_time_.toSec();
+    double other_traj_start_time = swarm_trajs_snapshot[drone_id].start_time_.toSec();
 
     double t_start = max(my_traj_start_time, other_traj_start_time);
-    double t_end = min(my_traj_start_time + local_data_.duration_ * 2 / 3, other_traj_start_time + swarm_trajs_buf_[drone_id].duration_);
+    double t_end = min(my_traj_start_time + local_data_.duration_ * 2 / 3, other_traj_start_time + swarm_trajs_snapshot[drone_id].duration_);
 
     for (double t = t_start; t < t_end; t += 0.03)
     {
-      if ((local_data_.position_traj_.evaluateDeBoorT(t - my_traj_start_time) - swarm_trajs_buf_[drone_id].position_traj_.evaluateDeBoorT(t - other_traj_start_time)).norm() < bspline_optimizer_->getSwarmClearance())
+      if ((local_data_.position_traj_.evaluateDeBoorT(t - my_traj_start_time) - swarm_trajs_snapshot[drone_id].position_traj_.evaluateDeBoorT(t - other_traj_start_time)).norm() < bspline_optimizer_->getSwarmClearance())
       {
         return true;
       }

@@ -88,7 +88,7 @@
     <param name="grid_map/local_update_range_x"  value="6.5" /> 
     <param name="grid_map/local_update_range_y"  value="6.5" /> 
     <param name="grid_map/local_update_range_z"  value="5.5" /> 
-    <param name="grid_map/obstacles_inflation"     value="0.50" /> 
+    <param name="grid_map/obstacles_inflation"     value="0.15" /> 
     <param name="grid_map/local_map_margin" value="30"/>
     <param name="grid_map/ground_height"        value="-0.5"/>
     <!-- camera parameter -->

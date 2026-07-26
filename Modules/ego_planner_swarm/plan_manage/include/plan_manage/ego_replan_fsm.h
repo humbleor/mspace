@@ -11,6 +11,7 @@
 #include <vector>
 #include <visualization_msgs/Marker.h>
 
+#include <boost/thread/mutex.hpp>
 #include <bspline_opt/bspline_optimizer.h>
 #include <plan_env/grid_map.h>
 #include <traj_utils/Bspline.h>

@@ -87,18 +87,28 @@ private:
   }
 
   void cloudCallback(const sensor_msgs::PointCloud2::ConstPtr& msg) {
-    // accumulation_frame_count_ == 0: 逐帧检测
-    if (accumulation_frame_count_ == 0) {
-      processCloudFrame(msg);
-      return;
-    }
+    try {
+      // accumulation_frame_count_ == 0: 逐帧检测
+      if (accumulation_frame_count_ == 0) {
+        processCloudFrame(msg);
+        return;
+      }
 
-    // accumulation_frame_count_ > 0: 积累 N 帧
-    cloud_buffer_.push_back(msg);
-    frame_counter_++;
+      // accumulation_frame_count_ > 0: 积累 N 帧
+      cloud_buffer_.push_back(msg);
+      frame_counter_++;
 
-    if (frame_counter_ >= accumulation_frame_count_) {
-      processAccumulatedClouds();
+      if (frame_counter_ >= accumulation_frame_count_) {
+        processAccumulatedClouds();
+        cloud_buffer_.clear();
+        frame_counter_ = 0;
+      }
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Exception in cloudCallback: %s", e.what());
+      cloud_buffer_.clear();
+      frame_counter_ = 0;
+    } catch (...) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Unknown exception in cloudCallback");
       cloud_buffer_.clear();
       frame_counter_ = 0;
     }
@@ -106,45 +116,57 @@ private:
 
   // 单帧检测（逐帧模式）
   void processCloudFrame(const sensor_msgs::PointCloud2::ConstPtr& msg) {
-    std::vector<TreeInfo> trees;
-    bool ok = detector_->detectFromROS(msg, trees);
+    try {
+      std::vector<TreeInfo> trees;
+      bool ok = detector_->detectFromROS(msg, trees);
 
-    if (!ok || trees.empty()) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected");
-      return;
+      if (!ok || trees.empty()) {
+        ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected");
+        return;
+      }
+
+      publishTrees(trees, msg->header.stamp, msg->header.frame_id);
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Exception in processCloudFrame: %s", e.what());
+    } catch (...) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Unknown exception in processCloudFrame");
     }
-
-    publishTrees(trees, msg->header.stamp, msg->header.frame_id);
   }
 
   // 积累多帧后检测
   void processAccumulatedClouds() {
     if (cloud_buffer_.empty()) return;
 
-    // 拼接所有帧，直接传入 TreeDetector（内部会做体素降采样）
-    TreeDetector::PointCloudPtr combined(new TreeDetector::PointCloudT());
-    for (const auto& msg : cloud_buffer_) {
-      pcl::PointCloud<pcl::PointXYZ> frame;
-      pcl::fromROSMsg(*msg, frame);
-      *combined += frame;
+    try {
+      // 拼接所有帧，直接传入 TreeDetector（内部会做体素降采样）
+      TreeDetector::PointCloudPtr combined(new TreeDetector::PointCloudT());
+      for (const auto& msg : cloud_buffer_) {
+        pcl::PointCloud<pcl::PointXYZ> frame;
+        pcl::fromROSMsg(*msg, frame);
+        *combined += frame;
+      }
+
+      std::vector<TreeInfo> trees;
+      bool ok = detector_->detect(combined, trees);
+
+      if (!ok || trees.empty()) {
+        ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected (accumulated %zu frames, %zu points)",
+                           cloud_buffer_.size(), combined->size());
+        return;
+      }
+
+      // 用最新一帧的 header
+      ros::Time stamp = cloud_buffer_.back()->header.stamp;
+      std::string frame_id = cloud_buffer_.back()->header.frame_id;
+      publishTrees(trees, stamp, frame_id);
+
+      ROS_DEBUG("[TreeDetectorNode] Accumulated %zu frames (%zu points) -> %zu trees",
+                cloud_buffer_.size(), combined->size(), trees.size());
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Exception in processAccumulatedClouds: %s", e.what());
+    } catch (...) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeDetectorNode] Unknown exception in processAccumulatedClouds");
     }
-
-    std::vector<TreeInfo> trees;
-    bool ok = detector_->detect(combined, trees);
-
-    if (!ok || trees.empty()) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected (accumulated %zu frames, %zu points)",
-                         cloud_buffer_.size(), combined->size());
-      return;
-    }
-
-    // 用最新一帧的 header
-    ros::Time stamp = cloud_buffer_.back()->header.stamp;
-    std::string frame_id = cloud_buffer_.back()->header.frame_id;
-    publishTrees(trees, stamp, frame_id);
-
-    ROS_DEBUG("[TreeDetectorNode] Accumulated %zu frames (%zu points) -> %zu trees",
-              cloud_buffer_.size(), combined->size(), trees.size());
   }
 
   // 发布检测结果
@@ -194,9 +216,17 @@ private:
 };
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "tree_detector_node");
-  ros::NodeHandle nh("~");
-  TreeDetectorNode node(nh);
-  ros::spin();
-  return 0;
+  try {
+    ros::init(argc, argv, "tree_detector_node");
+    ros::NodeHandle nh("~");
+    TreeDetectorNode node(nh);
+    ros::spin();
+    return 0;
+  } catch (const std::exception& e) {
+    ROS_FATAL("tree_detector_node crashed: %s", e.what());
+    return 1;
+  } catch (...) {
+    ROS_FATAL("tree_detector_node crashed with unknown exception");
+    return 1;
+  }
 }

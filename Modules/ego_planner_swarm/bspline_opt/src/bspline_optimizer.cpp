@@ -40,6 +40,8 @@ namespace ego_planner
 
   void BsplineOptimizer::setSwarmTrajs(SwarmTrajData *swarm_trajs_ptr) { swarm_trajs_ = swarm_trajs_ptr; }
 
+  void BsplineOptimizer::setSwarmTrajsSnapshot(const SwarmTrajData &snapshot) { swarm_trajs_snapshot_ = snapshot; }
+
   void BsplineOptimizer::setDroneId(const int drone_id) { drone_id_ = drone_id; }
 
   std::vector<ControlPoints> BsplineOptimizer::distinctiveTrajs(vector<std::pair<int, int>> segments)
@@ -785,18 +787,18 @@ namespace ego_planner
     {
       double glb_time = t_now + ((double)(order_ - 1) / 2 + (i - order_ + 1)) * bspline_interval_;
 
-      for (size_t id = 0; id < swarm_trajs_->size(); id++)
+      for (size_t id = 0; id < swarm_trajs_snapshot_.size(); id++)
       {
-        if ((swarm_trajs_->at(id).drone_id != (int)id) || swarm_trajs_->at(id).drone_id == drone_id_)
+        if ((swarm_trajs_snapshot_.at(id).drone_id != (int)id) || swarm_trajs_snapshot_.at(id).drone_id == drone_id_)
         {
           continue;
         }
 
-        double traj_i_satrt_time = swarm_trajs_->at(id).start_time_.toSec();
-        if (glb_time < traj_i_satrt_time + swarm_trajs_->at(id).duration_ - 0.1)
+        double traj_i_satrt_time = swarm_trajs_snapshot_.at(id).start_time_.toSec();
+        if (glb_time < traj_i_satrt_time + swarm_trajs_snapshot_.at(id).duration_ - 0.1)
         {
           /* def cost=(c-sqrt([Q-O]'D[Q-O]))^2, D=[1/b^2,0,0;0,1/b^2,0;0,0,1/a^2] */
-          Eigen::Vector3d swarm_prid = swarm_trajs_->at(id).position_traj_.evaluateDeBoorT(glb_time - traj_i_satrt_time);
+          Eigen::Vector3d swarm_prid = swarm_trajs_snapshot_.at(id).position_traj_.evaluateDeBoorT(glb_time - traj_i_satrt_time);
           Eigen::Vector3d dist_vec = cps_.points.col(i) - swarm_prid;
           double ellip_dist = sqrt(dist_vec(2) * dist_vec(2) * inv_a2 + (dist_vec(0) * dist_vec(0) + dist_vec(1) * dist_vec(1)) * inv_b2);
           double dist_err = CLEARANCE - ellip_dist;

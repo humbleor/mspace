@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 
+#include <mutex>
 #include <bspline_opt/bspline_optimizer.h>
 #include <bspline_opt/uniform_bspline.h>
 #include <traj_utils/DataDisp.h>
@@ -53,6 +54,7 @@ namespace ego_planner
     GridMap::Ptr grid_map_;
     fast_planner::ObjPredictor::Ptr obj_predictor_;    
     SwarmTrajData swarm_trajs_buf_;
+    std::mutex swarm_traj_mutex_;
 
   private:
     /* main planning algorithms & modules */

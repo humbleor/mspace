@@ -56,7 +56,7 @@ source devel/setup.bash
 - **bspline_opt** — B 样条轨迹优化（碰撞/平滑/可行性梯度下降优化）
 - **path_searching** — `DynAStar` 运动学 A* 路径搜索
 - **traj_utils** — 轨迹工具函数
-- **drone_detect** — 基于深度/相机数据的无人机互检
+- **drone_detect** — 基于深度/相机数据的无人机互检，CATKIN_IGNORE忽略编译
 - **drone_detect_lidar** — 森林场景树干特征多机相对定位（见下节）
 - **rosmsg_tcp_bridge** — 基于 TCP 的 ROS 消息桥接，用于蜂群通信
 - **uav_simulator/** — 仿真基础设施：`fake_drone`（默认，轻量运动学模型）、`local_sensing`（仿真深度/点云传感器，CPU/GPU 模式）、`lidar_map_generator` / `map_generator` / `mockamap`（地图生成）、`so3_control` + `so3_quadrotor_simulator`（完整 SO(3) 动力学，可选，CPU 占用高）

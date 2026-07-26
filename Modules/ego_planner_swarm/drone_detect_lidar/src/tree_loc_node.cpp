@@ -126,27 +126,43 @@ private:
   }
 
   void selfTreeCallback(const drone_detect_lidar::TreeDetection::ConstPtr& msg) {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    self_trees_ = msg;
-    has_self_trees_ = true;
+    try {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      self_trees_ = msg;
+      has_self_trees_ = true;
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Exception in selfTreeCallback: %s", e.what());
+    }
   }
 
   void neighborTreeCallback(const drone_detect_lidar::TreeDetection::ConstPtr& msg) {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    neighbor_trees_ = msg;
-    has_neighbor_trees_ = true;
+    try {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      neighbor_trees_ = msg;
+      has_neighbor_trees_ = true;
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Exception in neighborTreeCallback: %s", e.what());
+    }
   }
 
   void selfOdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    self_odom_ = msg;
-    has_self_odom_ = true;
+    try {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      self_odom_ = msg;
+      has_self_odom_ = true;
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Exception in selfOdomCallback: %s", e.what());
+    }
   }
 
   void neighborOdomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
-    std::lock_guard<std::mutex> lock(data_mutex_);
-    neighbor_odom_ = msg;
-    has_neighbor_odom_ = true;
+    try {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      neighbor_odom_ = msg;
+      has_neighbor_odom_ = true;
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Exception in neighborOdomCallback: %s", e.what());
+    }
   }
 
   // ===== Triangle construction (HashReg build_stdesc style) =====
@@ -348,6 +364,7 @@ private:
   }
 
   void computeTimerCallback(const ros::TimerEvent&) {
+    try {
     // Thread-safe snapshot of shared data
     drone_detect_lidar::TreeDetection::ConstPtr self_trees_snap;
     drone_detect_lidar::TreeDetection::ConstPtr neighbor_trees_snap;
@@ -723,13 +740,27 @@ private:
     ROS_INFO("[TreeLocNode] drone_dist=%.1fm, matched=%d, trans=(%.3f, %.3f), "
              "yaw=%.2f deg, wrms=%.3fm",
              drone_dist, n, t(0), t(1), yaw_deg, wrms_residual);
+
+    } catch (const std::exception& e) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Exception in computeTimerCallback: %s", e.what());
+    } catch (...) {
+      ROS_ERROR_THROTTLE(2.0, "[TreeLocNode] Unknown exception in computeTimerCallback");
+    }
   }
 };
 
 int main(int argc, char** argv) {
-  ros::init(argc, argv, "tree_loc_node");
-  ros::NodeHandle nh("~");
-  TreeLocNode node(nh);
-  ros::spin();
-  return 0;
+  try {
+    ros::init(argc, argv, "tree_loc_node");
+    ros::NodeHandle nh("~");
+    TreeLocNode node(nh);
+    ros::spin();
+    return 0;
+  } catch (const std::exception& e) {
+    ROS_FATAL("tree_loc_node crashed: %s", e.what());
+    return 1;
+  } catch (...) {
+    ROS_FATAL("tree_loc_node crashed with unknown exception");
+    return 1;
+  }
 }
