@@ -63,8 +63,6 @@ private:
   void loadParameters() {
     nh_.param("drone_id", drone_id_, 0);
     nh_.param<std::string>("frame_id", frame_id_, "world");
-    nh_.param("tree_height_min", detector_config_.tree_height_min, 0.3);
-    nh_.param("tree_height_max", detector_config_.tree_height_max, 3.0);
     nh_.param("tree_voxel_size", detector_config_.tree_voxel_size, 0.15);
     nh_.param("tree_cluster_tolerance", detector_config_.tree_cluster_tolerance, 0.3);
     nh_.param("tree_min_cluster_size", detector_config_.tree_min_cluster_size, 20);

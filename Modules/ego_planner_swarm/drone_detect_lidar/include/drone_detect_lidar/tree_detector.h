@@ -30,8 +30,6 @@ struct TreeInfo {
 };
 
 struct TreeDetectorConfig {
-  double tree_height_min;       // 裁剪下限 (m)，去除地面
-  double tree_height_max;       // 裁剪上限 (m)，去除树冠
   double tree_voxel_size;       // 降采样分辨率 (m)
   double tree_cluster_tolerance; // 聚类最大间距 (m)
   int tree_min_cluster_size;    // 最小聚类点数
@@ -46,8 +44,7 @@ struct TreeDetectorConfig {
   double patchwork_max_range;     // PatchWork++ 最大探测距离 (m)
   double patchwork_min_range;     // PatchWork++ 最小探测距离 (m)
 
-  TreeDetectorConfig()
-    : tree_height_min(0.3), tree_height_max(3.0),
+  TreeDetectorConfig() :
       tree_voxel_size(0.15), tree_cluster_tolerance(0.3),
       tree_min_cluster_size(20), tree_max_cluster_size(5000),
       tree_linearity_threshold(0.6), tree_planarity_threshold(0.3),
@@ -61,11 +58,10 @@ struct TreeDetectorConfig {
  *
  * 流程:
  * 1. 体素降采样
- * 2. Z 轴高度裁剪（去除地面和树冠）
- * 3. PatchWork++ 地面剔除（处理起伏地形）
- * 4. 欧氏聚类
- * 5. 连续性/几何约束筛选：线性度 + 平面度 + 高度延伸 + 横截面圆度
- * 6. 树干参数估计：底部位置 + 高度 + 直径
+ * 2. PatchWork++ 地面剔除
+ * 3. 欧氏聚类
+ * 4. PCA筛选：线性度 + 平面度 + 高度延伸 + 横截面圆度
+ * 5. 树干参数估计：底部位置 + 高度 + 直径
  */
 class TreeDetector {
 public:
@@ -98,7 +94,6 @@ private:
   std::unique_ptr<patchwork::PatchWorkpp> patchworkpp_;
   patchwork::Params patchwork_params_;
 
-  PointCloudPtr heightCrop(const PointCloudPtr& cloud);
   PointCloudPtr removeGroundPatchWork(const PointCloudPtr& cloud);
   std::vector<PointCloudPtr> clusterPoints(const PointCloudPtr& cloud);
   bool computeTreeParameters(const PointCloudPtr& cluster, TreeInfo& tree);

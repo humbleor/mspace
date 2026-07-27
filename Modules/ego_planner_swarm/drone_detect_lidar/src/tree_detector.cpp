@@ -45,16 +45,8 @@ bool TreeDetector::detect(const PointCloudPtr& cloud_in, std::vector<TreeInfo>& 
   voxel.setLeafSize(config_.tree_voxel_size, config_.tree_voxel_size, config_.tree_voxel_size);
   voxel.filter(*downsampled);
 
-  // 步骤2: 高度裁剪（去除地面和树冠）
-  PointCloudPtr cropped = heightCrop(downsampled);
-  if (cropped->size() < static_cast<size_t>(config_.tree_min_cluster_size)) {
-    ROS_WARN_THROTTLE(2.0, "[TreeDetector] Too few points after height crop: %zu", cropped->size());
-    last_processing_time_ = (ros::WallTime::now() - start).toSec();
-    return false;
-  }
-
-  // 步骤3: PatchWork++ 地面剔除
-  PointCloudPtr no_ground = removeGroundPatchWork(cropped);
+  // 步骤2: PatchWork++ 地面剔除
+  PointCloudPtr no_ground = removeGroundPatchWork(downsampled);
   if (no_ground->size() < static_cast<size_t>(config_.tree_min_cluster_size)) {
     ROS_WARN_THROTTLE(2.0, "[TreeDetector] Too few points after ground removal: %zu", no_ground->size());
     last_processing_time_ = (ros::WallTime::now() - start).toSec();
@@ -104,17 +96,6 @@ bool TreeDetector::detectFromROS(const sensor_msgs::PointCloud2::ConstPtr& msg,
   PointCloudPtr cloud(new PointCloudT());
   pcl::fromROSMsg(*msg, *cloud);
   return detect(cloud, trees_out);
-}
-
-// 按 Z 轴裁剪
-TreeDetector::PointCloudPtr TreeDetector::heightCrop(const PointCloudPtr& cloud) {
-  PointCloudPtr out(new PointCloudT());
-  for (const auto& pt : *cloud) {
-    if (pt.z >= config_.tree_height_min && pt.z <= config_.tree_height_max) {
-      out->push_back(pt);
-    }
-  }
-  return out;
 }
 
 // PatchWork++ 地面剔除
