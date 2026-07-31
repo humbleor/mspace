@@ -4,21 +4,6 @@ using namespace std;
 void mainloop_cb(const ros::TimerEvent &e);
 void control_cb(const ros::TimerEvent &e);
 
-void pos_target_cb(const mavros_msgs::PositionTarget::ConstPtr& msg)
-{
-    // Target pos of the drone [from fcu]
-    Eigen::Vector3d pos_drone_fcu_target;
-    // Target vel of the drone [from fcu]
-    Eigen::Vector3d vel_drone_fcu_target;
-    // Target accel of the drone [from fcu]
-    Eigen::Vector3d accel_drone_fcu_target;
-    pos_drone_fcu_target = Eigen::Vector3d(msg->position.x, msg->position.y, msg->position.z);
-
-    vel_drone_fcu_target = Eigen::Vector3d(msg->velocity.x, msg->velocity.y, msg->velocity.z);
-
-    accel_drone_fcu_target = Eigen::Vector3d(msg->acceleration_or_force.x, msg->acceleration_or_force.y, msg->acceleration_or_force.z);
-}
-
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>主 函 数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 int main(int argc, char **argv)
 {
@@ -59,8 +44,6 @@ int main(int argc, char **argv)
         drift_correction_pub[i] = nh.advertise<drone_detect_lidar::DriftCorrection>(
             uav_name + "/drift_correction_diag_" + std::to_string(i), 10);
     }
-
-    // position_target_sub = nh.subscribe<mavros_msgs::PositionTarget>("/mavros/setpoint_raw/target_local", 10, pos_target_cb);
 
     // 【发布】位置/速度/加速度期望值 坐标系 ENU系
     //  本话题要发送至飞控(通过Mavros功能包 /plugins/setpoint_raw.cpp发送), 对应Mavlink消息为SET_POSITION_TARGET_LOCAL_NED (#84), 对应的飞控中的uORB消息为position_setpoint_triplet.msg

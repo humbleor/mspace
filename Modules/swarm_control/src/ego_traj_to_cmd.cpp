@@ -34,9 +34,7 @@ int uav_id;
 int control_flag;
 // ego输出
 quadrotor_msgs::PositionCommand ego_traj_cmd;
-bool get_ego_traj;
-geometry_msgs::PoseStamped ego_data;      //using rviz
-geometry_msgs::Pose q;
+// bool get_ego_traj;
 // 发布的控制指令
 prometheus_msgs::SwarmCommand Command_Now;
 
@@ -47,6 +45,7 @@ ros::Publisher ego_pos_rviz_ref_pub;
 geometry_msgs::Pose to_quaternion(double pitch, double roll, double yaw)
 {
     double t0, t1, t2, t3, t4, t5;
+    geometry_msgs::Pose q;
     t0 = cos(yaw * 0.5);
     t1 = sin(yaw * 0.5);
     t2 = cos(roll * 0.5);
@@ -63,13 +62,14 @@ geometry_msgs::Pose to_quaternion(double pitch, double roll, double yaw)
 void ego_ouput_cb(const quadrotor_msgs::PositionCommand::ConstPtr& msg)
 {
     ego_traj_cmd = *msg;
-    get_ego_traj = true;
+    // get_ego_traj = true;
 
+    geometry_msgs::PoseStamped ego_data;
     ego_data.header = ego_traj_cmd.header;
     ego_data.pose.position.x = ego_traj_cmd.position.x;
     ego_data.pose.position.y = ego_traj_cmd.position.y;
     ego_data.pose.position.z = ego_traj_cmd.position.z;
-    q = to_quaternion(0, 0, ego_traj_cmd.yaw);
+    geometry_msgs::Pose q = to_quaternion(0, 0, ego_traj_cmd.yaw);
     ego_data.pose.orientation.x = q.orientation.x;
     ego_data.pose.orientation.y = q.orientation.y;
     ego_data.pose.orientation.z = q.orientation.z;
@@ -78,7 +78,7 @@ void ego_ouput_cb(const quadrotor_msgs::PositionCommand::ConstPtr& msg)
 
     if(ego_traj_cmd.velocity.x == 0)
     {
-        get_ego_traj = false;
+        // get_ego_traj = false;
         //cout << YELLOW <<  " Arrive the goal " << TAIL <<endl;
     }else
     {

@@ -374,7 +374,8 @@ private:
       std::lock_guard<std::mutex> lock(data_mutex_);
       if (!has_self_trees_ || !has_neighbor_trees_ ||
           !has_self_odom_ || !has_neighbor_odom_) {
-        ROS_DEBUG_THROTTLE(1.0, "[TreeLocNode] Waiting for data");
+        ROS_WARN_THROTTLE(5.0, "[TreeLocNode] Waiting for data: self_trees=%d, neighbor_trees=%d, self_odom=%d, neighbor_odom=%d",
+                         has_self_trees_, has_neighbor_trees_, has_self_odom_, has_neighbor_odom_);
         return;
       }
       self_trees_snap = self_trees_;
@@ -395,7 +396,10 @@ private:
 
     double drone_dist = (p_self - p_neighbor).norm();
     if (drone_dist > drone_dist_threshold_) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] Drones too far: %.1f m", drone_dist);
+      ROS_WARN_THROTTLE(5.0, "[TreeLocNode] Drones too far: %.1f m (threshold %.1f m). "
+                       "self_odom=(%.1f,%.1f) neighbor_odom=(%.1f,%.1f)",
+                       drone_dist, drone_dist_threshold_,
+                       p_self[0], p_self[1], p_neighbor[0], p_neighbor[1]);
       return;
     }
 
@@ -404,8 +408,8 @@ private:
     const auto& neighbor_trees = neighbor_trees_snap->trees;
 
     if (self_trees.size() < 3 || neighbor_trees.size() < 3) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] Not enough trees: self=%zu, neighbor=%zu",
-                         self_trees.size(), neighbor_trees.size());
+      ROS_WARN_THROTTLE(5.0, "[TreeLocNode] Not enough trees: self=%zu, neighbor=%zu (need >=3 each)",
+                       self_trees.size(), neighbor_trees.size());
       return;
     }
 
@@ -416,8 +420,9 @@ private:
     auto neighbor_tris = buildTriangles(neighbor_trees);
 
     if (self_tris.empty() || neighbor_tris.empty()) {
-      ROS_DEBUG_THROTTLE(2.0, "[TreeLocNode] No valid triangles: self=%zu, neighbor=%zu",
-                         self_tris.size(), neighbor_tris.size());
+      ROS_WARN_THROTTLE(5.0, "[TreeLocNode] No valid triangles: self=%zu, neighbor=%zu (from %zu, %zu trees)",
+                       self_tris.size(), neighbor_tris.size(),
+                       self_trees.size(), neighbor_trees.size());
       return;
     }
 
@@ -497,19 +502,13 @@ private:
     ROS_INFO("[TreeLocNode] Candidate triangle pairs after centroid filter: %zu",
               candidate_matches.size());
 
-    // ===== Step 0b: Odometry-based relative pose prior =====
-    // Use drone odometry as an initial guess for the relative transform.
-    // Any tree-matching result that deviates too far from this prior is
-    // likely a false match (e.g. matching triangles from different tree groups).
-    Eigen::Vector2d t_odom(
-      p_neighbor[0] - p_self[0],
-      p_neighbor[1] - p_self[1]);
-
-    // 2c. Voting verification with odometry prior (HashReg candidate_frames_verify)
+    // 2c. Voting verification (HashReg candidate_frames_verify)
+    // Trees are in world coordinates, so odometry-based prior is not applicable
+    // (tree-to-tree transform ≈ sensor drift, NOT drone-to-drone separation).
+    // Rely purely on geometric voting to identify correct matches.
     int best_vote = 0;
     Eigen::Vector2d t_best(0, 0);
     Eigen::Matrix2d R_best = Eigen::Matrix2d::Identity();
-    double best_odom_dist = 1e9;  // distance from odometry prior (for tie-breaking)
 
     // Pre-build point list for fast verification
     std::vector<Eigen::Vector2d> self_pts(self_trees.size());
@@ -519,31 +518,12 @@ private:
     for (size_t i = 0; i < neighbor_trees.size(); i++)
       neighbor_pts[i] << neighbor_trees[i].x, neighbor_trees[i].y;
 
-    // Odometry consistency tolerance: translation within 2m of odometry prior
-    // yaw within 30 degrees. These are generous enough for odometry drift.
-    const double kMaxOdomTransDist = 2.0;
-    const double kMaxOdomYawDeg = 30.0;
-
     for (size_t m = 0; m < candidate_matches.size(); m++) {
       std::pair<Eigen::Vector2d, Eigen::Matrix2d> result =
         triangleSolver(self_tris[candidate_matches[m].self_idx],
                         neighbor_tris[candidate_matches[m].neighbor_idx]);
       Eigen::Vector2d t = result.first;
       Eigen::Matrix2d R = result.second;
-
-      // Check consistency with odometry prior
-      double trans_diff = (t - t_odom).norm();
-      if (trans_diff > kMaxOdomTransDist) {
-        continue;  // Translation too far from odometry, likely false match
-      }
-      double yaw = std::atan2(R(1, 0), R(0, 0));
-      double yaw_diff_deg = std::abs(yaw) * 180.0 / M_PI;
-      // Note: odometry gives translation only (no yaw diff available since we
-      // don't have relative yaw from odom directly). We just check that the
-      // resulting yaw is within a reasonable range.
-      if (yaw_diff_deg > kMaxOdomYawDeg + max_yaw_deg_) {
-        continue;  // Yaw too large
-      }
 
       int vote = 0;
       for (size_t i = 0; i < self_pts.size(); i++) {
@@ -556,13 +536,11 @@ private:
         }
       }
 
-      // Prefer higher vote; break ties by choosing the one closer to odometry prior
-      double odom_dist = trans_diff;
-      if (vote > best_vote || (vote == best_vote && vote > 0 && odom_dist < best_odom_dist)) {
+      // Keep candidate with highest vote (first wins on tie)
+      if (vote > best_vote) {
         best_vote = vote;
         t_best = t;
         R_best = R;
-        best_odom_dist = odom_dist;
       }
     }
 
@@ -571,8 +549,7 @@ private:
       return;
     }
 
-    ROS_INFO("[TreeLocNode] Best triangle match vote: %d, odom_prior_diff=%.3f m",
-             best_vote, best_odom_dist);
+    ROS_INFO("[TreeLocNode] Best triangle match vote: %d", best_vote);
 
     // 2d. Collect correspondences using best (t, R)
     struct MatchedPair {

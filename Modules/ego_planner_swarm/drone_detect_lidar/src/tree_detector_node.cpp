@@ -119,7 +119,7 @@ private:
       bool ok = detector_->detectFromROS(msg, trees);
 
       if (!ok || trees.empty()) {
-        ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected");
+        ROS_WARN_THROTTLE(5.0, "[TreeDetectorNode] No trees detected in point cloud");
         return;
       }
 
@@ -148,8 +148,8 @@ private:
       bool ok = detector_->detect(combined, trees);
 
       if (!ok || trees.empty()) {
-        ROS_DEBUG_THROTTLE(2.0, "[TreeDetectorNode] No trees detected (accumulated %zu frames, %zu points)",
-                           cloud_buffer_.size(), combined->size());
+        ROS_WARN_THROTTLE(5.0, "[TreeDetectorNode] No trees detected (accumulated %zu frames, %zu points)",
+                         cloud_buffer_.size(), combined->size());
         return;
       }
 

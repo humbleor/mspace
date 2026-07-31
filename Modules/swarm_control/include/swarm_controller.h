@@ -57,7 +57,6 @@ prometheus_msgs::Message message;               // 待打印消息
 // 订阅
 ros::Subscriber command_sub;
 ros::Subscriber drone_state_sub;
-ros::Subscriber position_target_sub;
 ros::Subscriber nei_state_sub[MAX_UAV_NUM+1];
 
 // 漂移补偿订阅
@@ -88,7 +87,7 @@ float r = 0.5;
 // 漂移补偿
 Eigen::Vector3d drift_nei[MAX_UAV_NUM+1];                   // EMA 滤波后的漂移量 (dx, dy, yaw)
 Eigen::Vector3d drift_raw_nei[MAX_UAV_NUM+1];               // 原始漂移量（用于异常值检测）
-Eigen::Vector3d pos_nei_raw[MAX_UAV_NUM+1];                  // 纠正前的邻居位置（诊断用）
+Eigen::Vector3d pos_nei_raw[MAX_UAV_NUM+1];                // 纠正前的邻居位置（诊断用）
 ros::Time drift_timestamp[MAX_UAV_NUM+1];                   // 漂移量时间戳
 bool enable_drift_correction;                               // 总开关
 double ema_alpha;                                           // EMA 滤波系数
@@ -149,12 +148,6 @@ void init(ros::NodeHandle &nh)
     // 无人机编号 1号无人机则为1
     nh.param<int>("uav_id", uav_id, 0);
     uav_name = "/uav" + std::to_string(uav_id);
-
-    // //可监听到的无人机编号，目前设定为可监听到两台无人机，后期考虑可通过数组传递参数，监听任意ID的无人机
-    // nh.param<int>("neighbour_id1", neighbour_id1, 0);
-    // nh.param<int>("neighbour_id2", neighbour_id2, 0);
-    // neighbour_name1 = "/uav" + std::to_string(neighbour_id1);
-    // neighbour_name2 = "/uav" + std::to_string(neighbour_id2);
 
     // 控制器标志位: 0代表姿态（使用本程序的位置环控制算法），1代表位置、速度（使用PX4的位置环控制算法）
     nh.param<int>("controller_flag", controller_flag, 1);
