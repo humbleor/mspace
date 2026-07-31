@@ -6,15 +6,10 @@
 
   <!-- <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen" launch-prefix="valgrind" > -->
   <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen" >
-    <remap from="position_cmd" to="uav_$(arg uav_id)/planning/pos_cmd"/>
-    <remap from="planning/bspline" to="uav_$(arg uav_id)/planning/bspline"/>
-    <!-- <remap from="~my_odom" to="/vins_estimator/imu_propagate"/> -->
-
     <param name="next_drone_ip" value="$(arg next_drone_ip)" type="string"/>
     <param name="broadcast_ip" value="$(arg broadcast_ip)" type="string"/>
     <param name="drone_id" value="$(arg uav_id)"/>
     <param name="odom_max_freq" value="70"/>
-
   </node>
 
 </launch>

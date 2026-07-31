@@ -93,7 +93,7 @@
         <param name="so3_control/init_state_y" value="$(arg init_y_)"/>
         <param name="so3_control/init_state_z" value="$(arg init_z_)"/>
         <remap from="~odom" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
-        <remap from="~position_cmd" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+        <remap from="~position_cmd" to="/uav$(arg uav_id)/planning/ego/traj_cmd"/>
         <remap from="~motors" to="uav_$(arg uav_id)_motors"/>
         <remap from="~corrections" to="uav_$(arg uav_id)_corrections"/>
         <remap from="~so3_cmd" to="uav_$(arg uav_id)_so3_cmd"/>
@@ -110,7 +110,7 @@
         <param name="init_x" value="$(arg init_x_)"/>
         <param name="init_y" value="$(arg init_y_)"/>
         <param name="init_z" value="$(arg init_z_)"/>
-        <remap from="~command" to="/uav$(arg uav_id)/planning/pos_cmd"/>
+        <remap from="~command" to="/uav$(arg uav_id)/planning/ego/traj_cmd"/>
         <remap from="~odometry" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
   </node>
  
