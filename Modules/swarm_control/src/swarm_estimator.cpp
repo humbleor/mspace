@@ -71,8 +71,8 @@ void att_cb(const sensor_msgs::Imu::ConstPtr& msg)
     _DroneState.attitude[2] = euler_fcu[2];
 
     _DroneState.attitude_rate[0] = msg->angular_velocity.x;
-    _DroneState.attitude_rate[1] = msg->angular_velocity.x;
-    _DroneState.attitude_rate[2] = msg->angular_velocity.x;
+    _DroneState.attitude_rate[1] = msg->angular_velocity.y;
+    _DroneState.attitude_rate[2] = msg->angular_velocity.z;
 }
 
 void alt_cb(const std_msgs::Float64::ConstPtr &msg)

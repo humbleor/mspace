@@ -702,21 +702,32 @@ void pos_controller()
 	// 期望力 = 质量*控制量 + 重力抵消 + 期望加速度*质量*Ka
     Eigen::Vector3d F_des;
 	F_des = u_v * quad_mass + quad_mass * g_ + Ka * quad_mass * acc_des;
-    
-	// 如果向上推力小于重力的一半
-	// 或者向上推力大于重力的两倍
-	if (F_des(2) < 0.5 * quad_mass * g_(2))
+
+	// 推力上下限:保护 F_des(2) 在合理正区间,避免后续除零
+	const double thrust_lo = 0.5 * quad_mass * g_(2);
+	const double thrust_hi = 2.0 * quad_mass * g_(2);
+	if (F_des(2) < thrust_lo)
 	{
-		ROS_INFO("thrust too low");
-		F_des = F_des / F_des(2) * (0.5 * quad_mass * g_(2));
+		ROS_WARN_THROTTLE(1.0, "[pos_controller] thrust too low: %.3f", F_des(2));
+		if (std::fabs(F_des(2)) < 1e-3)
+		{
+			// z 分量近似 0:无法做方向缩放,水平分量清零,只给最小垂直推力
+			F_des(0) = 0.0;
+			F_des(1) = 0.0;
+			F_des(2) = thrust_lo;
+		}
+		else
+		{
+			F_des = F_des / F_des(2) * thrust_lo;
+		}
 	}
-	else if (F_des(2) > 2 * quad_mass * g_(2))
+	else if (F_des(2) > thrust_hi)
 	{
-		ROS_INFO("thrust too high");
-		F_des = F_des / F_des(2) * (2 * quad_mass * g_(2));
+		ROS_WARN_THROTTLE(1.0, "[pos_controller] thrust too high: %.3f", F_des(2));
+		F_des = F_des / F_des(2) * thrust_hi;
 	}
 
-	// 角度限制幅度
+	// 角度限制幅度 (F_des(2) 此时已被夹到正区间,除法安全)
 	if (std::fabs(F_des(0)/F_des(2)) > std::tan(uav_utils::toRad(tilt_angle_max)))
 	{
 		// ROS_INFO("pitch too tilt");
@@ -727,7 +738,7 @@ void pos_controller()
 	if (std::fabs(F_des(1)/F_des(2)) > std::tan(uav_utils::toRad(tilt_angle_max)))
 	{
 		// ROS_INFO("roll too tilt");
-		F_des(1) = F_des(1)/std::fabs(F_des(1)) * F_des(2) * std::tan(uav_utils::toRad(tilt_angle_max));	
+		F_des(1) = F_des(1)/std::fabs(F_des(1)) * F_des(2) * std::tan(uav_utils::toRad(tilt_angle_max));
 	}
 
     // F_des是位于ENU坐标系的,F_c是FLU

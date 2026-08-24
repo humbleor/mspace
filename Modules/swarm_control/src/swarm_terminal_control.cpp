@@ -124,7 +124,7 @@ int main(int argc, char **argv)
             pt.pose.position.x = state_desired[0];
             pt.pose.position.y = state_desired[1];
             pt.pose.position.z = state_desired[2];
-            pt.pose.orientation = tf::createQuaternionMsgFromYaw(state_desired[3]/180*3.1415926);
+            pt.pose.orientation = tf::createQuaternionMsgFromYaw(state_desired[3]);
             goal_pub.publish(pt);
 
             cout << "pos_des [X Y Z] : " << state_desired[0] << " [ m ] "<< state_desired[1] <<" [ m ] "<< state_desired[2] <<" [ m ] "<< endl;
