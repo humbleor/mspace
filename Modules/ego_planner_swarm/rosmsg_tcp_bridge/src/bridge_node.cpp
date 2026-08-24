@@ -4,15 +4,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <iostream>
+#include <mutex>
 #include <traj_utils/MultiBsplines.h>
 #include <traj_utils/Bspline.h>
 #include <nav_msgs/Odometry.h>
 #include <std_msgs/Empty.h>
+#include <std_msgs/Bool.h>
 
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #define PORT 8080
 #define UDP_PORT 8081
 #define BUF_LEN 1048576    // 1MB
@@ -27,6 +30,13 @@ string tcp_ip_, udp_ip_;
 int drone_id_;
 double odom_broadcast_freq_;
 char send_buf_[BUF_LEN], recv_buf_[BUF_LEN], udp_recv_buf_[BUF_LEN], udp_send_buf_[BUF_LEN];
+// protects send_sock_ across ROS callback (writer) and lazy reconnect
+std::mutex tcp_send_mtx_;
+// background reconnect state
+double reconnect_backoff_sec_ = 1.0;
+const double RECONNECT_BACKOFF_MAX = 30.0;
+bool tcp_connected_ = false;
+ros::Publisher connection_state_pub_;
 struct sockaddr_in addr_udp_send_;
 traj_utils::MultiBsplinesPtr bsplines_msg_;
 nav_msgs::OdometryPtr odom_msg_;
@@ -40,6 +50,47 @@ enum MESSAGE_TYPE
   ONE_TRAJ,
   STOP
 } massage_type_;
+
+// Tier 1 helper: enable kernel-level TCP keepalive so dead peer is detected in seconds,
+// not after send() finally fails (which can take many seconds).
+void set_keepalive(int sock)
+{
+  int enable = 1;
+  setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
+#ifdef TCP_KEEPIDLE
+  int idle = 5;    // first probe after 5s idle
+  setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
+  int intvl = 3;   // probe every 3s
+  setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
+  int cnt = 2;     // 2 failed probes => dead (~11s total)
+  setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
+#endif
+}
+
+// Tier 1 helper: publish /uav{X}/bridge_connection_state (Bool), dedupe + log on edge.
+void publish_connection_state(bool connected)
+{
+  if (connected == tcp_connected_) return;
+  tcp_connected_ = connected;
+  if (connected) ROS_INFO("[bridge_node] TCP link UP");
+  else           ROS_WARN("[bridge_node] TCP link DOWN, will reconnect");
+  std_msgs::Bool msg;
+  msg.data = connected;
+  if (connection_state_pub_) connection_state_pub_.publish(msg);
+}
+
+void reconnect_fun();  // forward decl
+
+// Tier 2: graceful close — send FIN to peer before close so they see EOF, not RST.
+inline void shutdown_close_tcp(int &sock)
+{
+  if (sock >= 0)
+  {
+    shutdown(sock, SHUT_RDWR);
+    close(sock);
+    sock = -1;
+  }
+}
 
 int connect_to_next_drone(const char *ip, const int port)
 {
@@ -70,6 +121,8 @@ int connect_to_next_drone(const char *ip, const int port)
 
   char str[INET_ADDRSTRLEN];
   ROS_INFO("Connect to %s success!", inet_ntop(AF_INET, &serv_addr.sin_addr, str, sizeof(str)));
+  set_keepalive(sock);
+  publish_connection_state(true);
 
   return sock;
 }
@@ -145,6 +198,9 @@ int wait_connection_from_previous_drone(const int port, int &server_fd, int &new
     perror("accept");
     exit(EXIT_FAILURE);
   }
+
+  set_keepalive(new_socket);
+  publish_connection_state(true);
 
   char str[INET_ADDRSTRLEN];
   ROS_INFO( "Receive tcp connection from %s", inet_ntop(AF_INET, &address.sin_addr, str, sizeof(str)) );
@@ -595,9 +651,15 @@ int deserializeMultiBsplines(traj_utils::MultiBsplinesPtr &msg)
 void multitraj_sub_tcp_cb(const traj_utils::MultiBsplinesPtr &msg)
 {
   int len = serializeMultiBsplines(msg);
+  std::lock_guard<std::mutex> lk(tcp_send_mtx_);
+  if (send_sock_ < 0) return;  // reconnect_fun owns the socket; just drop this frame
+
   if (send(send_sock_, send_buf_, len, 0) <= 0)
   {
-    ROS_ERROR("TCP SEND ERROR!!!");
+    ROS_WARN("[bridge_node] TCP send failed");
+    close(send_sock_);
+    send_sock_ = -1;
+    publish_connection_state(false);  // reconnect_fun will retry with backoff
   }
 }
 
@@ -646,38 +708,39 @@ void one_traj_sub_udp_cb(const traj_utils::BsplinePtr &msg)
 
 void server_fun()
 {
-  int valread;
-
-  // Connect
-  if (wait_connection_from_previous_drone(PORT, server_fd_, recv_sock_) < 0)
+  while (ros::ok())
   {
-    ROS_ERROR("[bridge_node]Socket recever creation error!");
-    exit(EXIT_FAILURE);
+    // accept with retry — survives both startup race and peer reconnect
+    while (ros::ok() &&
+           wait_connection_from_previous_drone(PORT, server_fd_, recv_sock_) < 0)
+    {
+      ROS_WARN("[bridge_node] TCP accept failed, retry in 1s");
+      ros::Duration(1.0).sleep();
+    }
+    if (!ros::ok()) break;
+
+    // read until peer disconnects or node shuts down
+    int valread;
+    while (ros::ok() && (valread = read(recv_sock_, recv_buf_, BUF_LEN)) > 0)
+    {
+      if (valread == deserializeMultiBsplines(bsplines_msg_))
+      {
+        if (swarm_trajs_pub_)
+          swarm_trajs_pub_.publish(*bsplines_msg_);
+      }
+      else
+      {
+        ROS_ERROR("Received message length not matches the sent one!!!");
+      }
+    }
+    ROS_WARN("[bridge_node] TCP disconnected, will re-accept");
+    publish_connection_state(false);
+    shutdown_close_tcp(recv_sock_);
+    shutdown_close_tcp(server_fd_);
   }
 
-  while (true)
-  {
-    valread = read(recv_sock_, recv_buf_, BUF_LEN);
-
-    if ( valread <= 0 )
-    {
-      ROS_ERROR("Received message length <= 0, maybe connection has lost");
-      close(recv_sock_);
-      close(server_fd_);
-      return;
-    }
-
-    if ( valread == deserializeMultiBsplines(bsplines_msg_) )
-    {
-      if ( swarm_trajs_pub_ )
-        swarm_trajs_pub_.publish(*bsplines_msg_);
-    }
-    else
-    {
-      ROS_ERROR("Received message length not matches the sent one!!!");
-      continue;
-    }
-  }
+  shutdown_close_tcp(recv_sock_);
+  shutdown_close_tcp(server_fd_);
 }
 
 void udp_recv_fun()
@@ -763,6 +826,38 @@ void udp_recv_fun()
   }
 }
 
+// Tier 1: own the TCP send socket, reconnect with exponential backoff.
+// Runs in background so ROS callbacks never sit on a stuck OS-level connect().
+void reconnect_fun()
+{
+  while (ros::ok())
+  {
+    bool need_reconnect;
+    {
+      std::lock_guard<std::mutex> lk(tcp_send_mtx_);
+      need_reconnect = (send_sock_ < 0);
+    }
+    if (!need_reconnect)
+    {
+      ros::Duration(0.5).sleep();
+      continue;
+    }
+    int new_sock = connect_to_next_drone(tcp_ip_.c_str(), PORT);
+    if (new_sock >= 0)
+    {
+      std::lock_guard<std::mutex> lk(tcp_send_mtx_);
+      send_sock_ = new_sock;
+      reconnect_backoff_sec_ = 1.0;
+      // set_keepalive + publish_connection_state(true) already called inside connect_to_next_drone
+    }
+    else
+    {
+      ros::Duration(reconnect_backoff_sec_).sleep();
+      reconnect_backoff_sec_ = std::min(reconnect_backoff_sec_ * 2, RECONNECT_BACKOFF_MAX);
+    }
+  }
+}
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "rosmsg_tcp_bridge");
@@ -802,12 +897,19 @@ int main(int argc, char **argv)
   one_traj_sub_ = nh.subscribe("/broadcast_bspline", 100, one_traj_sub_udp_cb, ros::TransportHints().tcpNoDelay());
   one_traj_pub_ = nh.advertise<traj_utils::Bspline>("/broadcast_bspline2", 100);
 
+  // Tier 1: /uav{X}/bridge_connection_state
+  connection_state_pub_ = nh.advertise<std_msgs::Bool>(
+      "/uav" + std::to_string(drone_id_) + "/bridge_connection_state", 10);
+  publish_connection_state(false);
+
   boost::thread recv_thd(server_fun);
   recv_thd.detach();
   ros::Duration(0.1).sleep();
   boost::thread udp_recv_thd(udp_recv_fun);
   udp_recv_thd.detach();
   ros::Duration(0.1).sleep();
+  boost::thread reconnect_thd(reconnect_fun);
+  reconnect_thd.detach();
 
   // TCP connect
   send_sock_ = connect_to_next_drone(tcp_ip_.c_str(), PORT);
@@ -819,11 +921,11 @@ int main(int argc, char **argv)
 
   ros::spin();
 
-  close(send_sock_);
-  close(recv_sock_);
-  close(server_fd_);
-  close(udp_server_fd_);
-  close(udp_send_fd_);
+  shutdown_close_tcp(send_sock_);
+  shutdown_close_tcp(recv_sock_);
+  shutdown_close_tcp(server_fd_);
+  if (udp_server_fd_ >= 0) { close(udp_server_fd_); udp_server_fd_ = -1; }
+  if (udp_send_fd_ >= 0) { close(udp_send_fd_); udp_send_fd_ = -1; }
 
   return 0;
 }

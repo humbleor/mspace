@@ -3,6 +3,7 @@
 
 #include <ros/ros.h>
 #include <bitset>
+#include <algorithm>
 
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
@@ -14,6 +15,7 @@
 #include <nav_msgs/Odometry.h>
 #include <quadrotor_msgs/PositionCommand.h>
 #include <geometry_msgs/Vector3.h>
+#include <std_msgs/Bool.h>
 #include <drone_detect_lidar/DriftCorrection.h>
 
 #include "formation_utils.h"
@@ -58,6 +60,16 @@ prometheus_msgs::Message message;               // 待打印消息
 ros::Subscriber command_sub;
 ros::Subscriber drone_state_sub;
 ros::Subscriber nei_state_sub[MAX_UAV_NUM+1];
+
+// bridge 链路状态：bridge 断时 vel_des 自动 ×0.5（带斜坡+去抖动），任务不中断
+ros::Subscriber bridge_state_sub;
+bool   bridge_alive       = true;
+double vel_scale          = 1.0;   // 当前缩放，vel_des 出口前乘这个
+double vel_scale_target_  = 1.0;   // 目标值，由 callback 设置；control_cb 里斜坡逼近
+ros::Time bridge_state_since_;     // 上次接受状态切换的时间，用于去抖动
+const double BRIDGE_DEBOUNCE_SEC = 0.5;  // 两次切换最小间隔 < 0.5s → 视为抖动忽略
+const double VEL_SCALE_RAMP_PER_SEC = 0.5; // 0.5/s，1.0→0.5 需要 1 秒匀速过渡
+void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg);
 
 // 漂移补偿订阅
 ros::Subscriber tree_drift_sub[MAX_UAV_NUM+1];
@@ -304,9 +316,42 @@ void drone_state_cb(const prometheus_msgs::DroneState::ConstPtr& msg)
     q_drone.w() = msg->attitude_q.w;
     q_drone.x() = msg->attitude_q.x;
     q_drone.y() = msg->attitude_q.y;
-    q_drone.z() = msg->attitude_q.z;    
+    q_drone.z() = msg->attitude_q.z;
 
     yaw_drone = uav_utils::get_yaw_from_quaternion(q_drone);
+}
+
+// bridge 链路状态：断时 vel_des 斜坡降到 ×0.5（不是悬停）；带去抖动防 WiFi 快速翻转
+void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg)
+{
+    ros::Time now = ros::Time::now();
+    bool new_state = msg->data;
+
+    if (new_state == bridge_alive) {
+        // 与当前接受的状态一致 → 只更新时间戳
+        bridge_state_since_ = now;
+        return;
+    }
+
+    // 提议状态翻转：要求上一稳定状态已持续 >= BRIDGE_DEBOUNCE_SEC，否则视为抖动
+    if ((now - bridge_state_since_).toSec() < BRIDGE_DEBOUNCE_SEC) {
+        return;  // 太近，忽略这次翻转
+    }
+
+    bridge_alive = new_state;
+    bridge_state_since_ = now;
+    vel_scale_target_ = new_state ? 1.0 : 0.5;
+    // 真正的 vel_scale 在 control_cb 里斜坡逼近，不在这里突变
+
+    message.header.stamp = now;
+    if (!new_state) {
+        message.message_type = prometheus_msgs::Message::WARN;
+        message.content = "[bridge] TCP link DOWN, ramping velocity to 0.5x";
+    } else {
+        message.message_type = prometheus_msgs::Message::NORMAL;
+        message.content = "[bridge] TCP link UP, ramping velocity to 1.0x";
+    }
+    message_pub.publish(message);
 }
 
 // 漂移修正前置声明

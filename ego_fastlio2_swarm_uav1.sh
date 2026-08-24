@@ -7,6 +7,13 @@ source /opt/ros/noetic/setup.bash
 source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash
 
+# UAV1 = ROS Master (由 ego_fastlio2_swarm_mavros.sh 启动)
+export ROS_MASTER_URI=http://192.168.1.50:11311
+export ROS_IP=192.168.1.50
+
+# 等 Master 就绪，避免 tabs 起来后 roscore 还没在
+until rostopic list >/dev/null 2>&1; do sleep 1; done
+
 gnome-terminal \
 --window -e 'bash -c "sleep 5; roslaunch livox_ros_driver2 msg_MID360.launch; exec bash"' \
 --tab -e 'bash -c "sleep 15; roslaunch fast_lio mapping_mid360.launch uav_id:=1; exec bash"' \

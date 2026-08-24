@@ -27,6 +27,9 @@ int main(int argc, char **argv)
     //【订阅】本机状态信息
     drone_state_sub = nh.subscribe<prometheus_msgs::DroneState>(uav_name + "/prometheus/drone_state", 10, drone_state_cb);
 
+    //【订阅】bridge 链路状态 — 断时 vel_des 自动 ×0.5 而不是悬停
+    bridge_state_sub = nh.subscribe<std_msgs::Bool>(uav_name + "/bridge_connection_state", 10, bridgeStateCb);
+
     //【订阅】邻居飞机的状态信息
     for(int i = 1; i <= swarm_num; i++) 
     {
@@ -330,6 +333,12 @@ void control_cb(const ros::TimerEvent &e)
         return;
     }
 
+    // 平滑斜坡：每帧向 vel_scale_target_ 逼近 VEL_SCALE_RAMP_PER_SEC / controller_hz
+    //   例：1.0→0.5、controller_hz=50、RAMP=0.5/s → 每帧减 0.01，共 50 帧 = 1 秒匀速过渡
+    double ramp_delta = VEL_SCALE_RAMP_PER_SEC / controller_hz;
+    if (vel_scale < vel_scale_target_)      vel_scale = std::min(vel_scale + ramp_delta, vel_scale_target_);
+    else if (vel_scale > vel_scale_target_) vel_scale = std::max(vel_scale - ramp_delta, vel_scale_target_);
+
     if(controller_flag == 0)
     {
         // 计算控制量
@@ -353,6 +362,7 @@ void control_cb(const ros::TimerEvent &e)
             send_pos_setpoint(pos_des, yaw_des);
         }else if( Command_Now.Mode == prometheus_msgs::SwarmCommand::Velocity_Control )
         {
+            vel_des *= vel_scale;  // bridge 断时降速，不悬停
             send_vel_xy_pos_z_setpoint(pos_des, vel_des, yaw_des);
         }else if( Command_Now.Mode == prometheus_msgs::SwarmCommand::Accel_Control )
         {
@@ -371,10 +381,12 @@ void control_cb(const ros::TimerEvent &e)
             // }
             else if(Command_Now.Move_mode == prometheus_msgs::SwarmCommand::XY_VEL_Z_POS)
             {
+                vel_des *= vel_scale;  // bridge 断时降速
                 send_pos_vel_acc_setpoint(pos_des, vel_des, acc_des,yaw_des);
             }
             else if(Command_Now.Move_mode == prometheus_msgs::SwarmCommand::TRAJECTORY)
             {
+                vel_des *= vel_scale;  // bridge 断时降速，EGO planner 任务不中断
                 send_pos_vel_xyz_setpoint(pos_des, vel_des, yaw_des);
             }
             else

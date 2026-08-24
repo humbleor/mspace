@@ -7,6 +7,13 @@ source /opt/ros/noetic/setup.bash
 source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash
 
+# UAV1 (joey) = ROS Master，由 ego_fastlio2_swarm_mavros.sh 启动
+export ROS_MASTER_URI=http://192.168.1.50:11311
+export ROS_IP=192.168.1.40
+
+# 等 Master 就绪，避免 tabs 起来后 roscore 还没在
+until rostopic list >/dev/null 2>&1; do sleep 1; done
+
 UAV2_INIT_X=3.0
 # 注意：地面站只在 UAV1 上启动，UAV2 不需要
 gnome-terminal \
