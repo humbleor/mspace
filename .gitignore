@@ -1,7 +1,7 @@
 build/
 devel/
-Scripts/flight_data/
-AGENTS.md
+Scripts/flight_*
+# AGENTS.md
 # CLAUDE.md
 .catkin_tools
 .vscode

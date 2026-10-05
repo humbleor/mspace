@@ -76,11 +76,7 @@ void ego_ouput_cb(const quadrotor_msgs::PositionCommand::ConstPtr& msg)
     ego_data.pose.orientation.w = q.orientation.w;
     ego_pos_rviz_ref_pub.publish(ego_data);
 
-    if(ego_traj_cmd.velocity.x == 0)
-    {
-        // get_ego_traj = false;
-        //cout << YELLOW <<  " Arrive the goal " << TAIL <<endl;
-    }else
+    // Zero velocity is a valid stop/hold command; forward it to clear stale feedforward.
     {
         Command_Now.header.stamp     = ros::Time::now();
         Command_Now.Mode             = prometheus_msgs::SwarmCommand::Move;
