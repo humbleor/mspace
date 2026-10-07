@@ -688,7 +688,7 @@ void publish_cloud_bizhangfun(const ros::Publisher &pubLaserCloudFull) {
         if (pcl_wait_save->size() > 0 && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
         {
             pcd_index++;
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
+            string all_points_dir(root_dir + "/PCD/scans_" + to_string(pcd_index) + ".pcd");
             pcl::PCDWriter pcd_writer;
             cout << "current scan saved to /PCD/" << all_points_dir << endl;
             pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
@@ -758,7 +758,7 @@ void publish_frame_world(const ros::Publisher &pubLaserCloudFull)
         if (pcl_wait_save->size() > 0 && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval)
         {
             pcd_index++;
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
+            string all_points_dir(root_dir + "/PCD/scans_" + to_string(pcd_index) + ".pcd");
             pcl::PCDWriter pcd_writer;
             cout << "current scan saved to /PCD/" << all_points_dir << endl;
             pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
@@ -1020,6 +1020,7 @@ int main(int argc, char **argv)
 {
     ros::init(argc, argv, "drone_laserMapping");
     ros::NodeHandle nh;
+    nh.param<string>("output_root", root_dir, string(ROOT_DIR));
 
     nh.param<bool>("publish/path_en", path_en, true);
     nh.param<bool>("publish/scan_publish_en", scan_pub_en, true);
@@ -1291,7 +1292,7 @@ int main(int argc, char **argv)
     if (pcl_wait_save->size() > 0 && pcd_save_en)
     {
         string file_name = string("scans.pcd");
-        string all_points_dir(string(string(ROOT_DIR) + "PCD/") + file_name);
+        string all_points_dir(root_dir + "/PCD/" + file_name);
         pcl::PCDWriter pcd_writer;
         cout << "current scan saved to /PCD/" << file_name << endl;
         pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);

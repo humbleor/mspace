@@ -1,0 +1,129 @@
+Panels:
+- Class: rviz/Displays
+  Name: Displays
+- Class: rviz/Views
+  Name: Views
+Visualization Manager:
+  Class: ''
+  Global Options:
+    Fixed Frame: world
+    Background Color: 35; 40; 48
+    Frame Rate: 20
+  Displays:
+  - Class: rviz/Grid
+    Name: Ground grid
+    Enabled: true
+    Cell Size: 1
+    Plane Cell Count: 40
+    Color: 100; 110; 120
+    Alpha: 0.35
+  - Class: rviz/PointCloud2
+    Name: Forest PCD (display only)
+    Enabled: true
+    Topic: /sim/view/forest
+    Queue Size: 2
+    Style: Points
+    Size (Pixels): 2
+    Size (m): 0.035
+    Position Transformer: XYZ
+    Color Transformer: AxisColor
+    Color: 80; 180; 110
+    Alpha: 0.65
+    Axis: Z
+  - Class: rviz/PointCloud2
+    Name: Live LIO cloud
+    Enabled: true
+    Topic: /uav1/drone_cloud_registered
+    Queue Size: 2
+    Style: Points
+    Size (Pixels): 2
+    Size (m): 0.035
+    Position Transformer: XYZ
+    Color Transformer: FlatColor
+    Color: 255; 230; 100
+    Alpha: 1
+  - Class: rviz/PointCloud2
+    Name: EGO inflated obstacles
+    Enabled: false
+    Topic: /uav_1_ego_planner_node/grid_map/occupancy_inflate
+    Queue Size: 2
+    Style: Points
+    Size (Pixels): 2
+    Size (m): 0.035
+    Position Transformer: XYZ
+    Color Transformer: FlatColor
+    Color: 255; 100; 80
+    Alpha: 1
+  - Class: rviz/Path
+    Name: Physical trajectory
+    Enabled: true
+    Topic: /sim/view/truth_path
+    Color: 70; 190; 255
+    Line Style: Lines
+    Line Width: 0.035
+    Pose Style: None
+    Alpha: 1
+  - Class: rviz/Path
+    Name: LIO trajectory
+    Enabled: true
+    Topic: /sim/view/lio_path
+    Color: 255; 150; 40
+    Line Style: Lines
+    Line Width: 0.035
+    Pose Style: None
+    Alpha: 1
+  - Class: rviz/Path
+    Name: PX4 EKF trajectory
+    Enabled: true
+    Topic: /sim/view/fcu_path
+    Color: 80; 230; 110
+    Line Style: Lines
+    Line Width: 0.035
+    Pose Style: None
+    Alpha: 1
+  - Class: rviz/MarkerArray
+    Name: Drone and flight mode
+    Enabled: true
+    Marker Topic: /sim/view/vehicle
+    Queue Size: 10
+  - Class: rviz/MarkerArray
+    Name: Route goals
+    Enabled: true
+    Marker Topic: /sim/view/goals
+    Queue Size: 10
+  - Class: rviz/Marker
+    Name: EGO planned trajectory
+    Enabled: true
+    Marker Topic: /uav_1_ego_planner_node/optimal_list
+    Queue Size: 10
+  - Class: rviz/Marker
+    Name: EGO global reference
+    Enabled: true
+    Marker Topic: /uav_1_ego_planner_node/global_list
+    Queue Size: 10
+  - Class: rviz/Marker
+    Name: EGO current goal
+    Enabled: true
+    Marker Topic: /uav_1_ego_planner_node/goal_point
+    Queue Size: 10
+  Tools:
+  - Class: rviz/Interact
+  - Class: rviz/MoveCamera
+  - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Name: Current View
+      Distance: 20
+      Focal Point:
+        X: 5
+        Y: -1
+        Z: 1.5
+      Pitch: 0.65
+      Yaw: 0.7
+      Target Frame: world
+Window Geometry:
+  Width: 1300
+  Height: 850
+  X: 40
+  Y: 40

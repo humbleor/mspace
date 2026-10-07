@@ -12,3 +12,7 @@ _ext
 *.so
 nano.save
 .catkin_workspace
+
+# Generated bag audits, maps and isolated ROS replay logs.
+/artifacts/forest_lio/
+/artifacts/px4_forest/

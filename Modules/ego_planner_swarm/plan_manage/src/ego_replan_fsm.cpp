@@ -40,6 +40,7 @@ namespace ego_planner
     nh.param("fsm/numSpiralSegments", numSpiralSegments_, 4);
     nh.param("fsm/waypointDistriFlag", waypointDistriFlag_, 1);
     nh.param("fsm/grid_direction", grid_direction_, 0);
+    nh.param("fsm/strict_waypoint_tracking", strict_waypoint_tracking_, false);
     nh.param("fsm/minZ_rotate", minZ_rotate_, -1.0);
     nh.param("fsm/maxZ_rotate", maxZ_rotate_, -1.0);
     nh.param("fsm/stepZ_rotate", stepZ_rotate_, -1.0);
@@ -493,6 +494,18 @@ namespace ego_planner
   // 读取预设目标点
   void EGOReplanFSM::readGivenWps()
   {
+    if (strict_waypoint_tracking_)
+    {
+      if (wps_.empty())
+      {
+        ROS_ERROR("Strict mission requires at least one waypoint.");
+        return;
+      }
+      wp_id_ = 0;
+      planNextWaypoint(wps_[wp_id_]);
+      return;
+    }
+
     if (waypoint_num_ > 1 && (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET))
     {
       bool success = planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), wps_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
@@ -549,6 +562,13 @@ namespace ego_planner
 
     if (!found_valid)
     {
+      if (strict_waypoint_tracking_)
+      {
+        ROS_ERROR("Cannot execute waypoint %d; strict mission will not skip it.", wp_id_);
+        have_target_ = false;
+        changeFSMExecState(WAIT_TARGET, "WP_BLOCKED");
+        return;
+      }
       ROS_ERROR("Skipping waypoint %d because no nearby free space was found.", wp_id_);
       wp_id_++;
       if (wp_id_ < waypoint_num_)
@@ -563,6 +583,7 @@ namespace ego_planner
       return;
     } else {
       // Visualize the relocated target point (Color: Yellow)
+      if (strict_waypoint_tracking_) wps_[wp_id_] = next_wp_check;
       visualization_->displayGoalPoint(next_wp_check, Eigen::Vector4d(1.0, 1.0, 0, 1), 0.3, 100 + wp_id_);
     }
 
@@ -992,9 +1013,9 @@ namespace ego_planner
 
       /* 1. 动态重定位逻辑：当目标点进入雷达感知范围时进行校验 (雷达实时建图重定位) */
       static int last_checked_wp_id = -1;
-      if (wp_id_ < waypoint_num_ && wp_id_ != last_checked_wp_id)
+      if (wp_id_ < waypoint_num_ && (strict_waypoint_tracking_ || wp_id_ != last_checked_wp_id))
       {
-        double dist_to_wp = (wps_[wp_id_] - pos).norm();
+        double dist_to_wp = (wps_[wp_id_] - (strict_waypoint_tracking_ ? odom_pos_ : pos)).norm();
         if (dist_to_wp < planning_horizen_)
         {
           Eigen::Vector3d old_wp = wps_[wp_id_];
@@ -1004,11 +1025,11 @@ namespace ego_planner
             visualization_->displayGoalPoint(wps_[wp_id_], Eigen::Vector4d(1.0, 1.0, 0, 1), 0.3, 100 + wp_id_);
 
             std::vector<Eigen::Vector3d> remaining_wps;
-            for (int i = wp_id_; i < waypoint_num_; i++) remaining_wps.push_back(wps_[i]);
+            for (int i = wp_id_; i < (strict_waypoint_tracking_ ? wp_id_ + 1 : waypoint_num_); i++) remaining_wps.push_back(wps_[i]);
             
             if (planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), remaining_wps, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero()))
             {
-              end_pt_ = wps_.back();
+              end_pt_ = strict_waypoint_tracking_ ? wps_[wp_id_] : wps_.back();
               constexpr double step_size_t = 0.1;
               int i_end = floor(planner_manager_->global_data_.global_duration_ / step_size_t);
               vector<Eigen::Vector3d> global_traj(i_end);
@@ -1022,6 +1043,31 @@ namespace ego_planner
           }
           last_checked_wp_id = wp_id_; 
         }
+      }
+
+      // Strict missions target one waypoint at a time. A planned spline
+      // reaching its endpoint does not prove that the physical UAV arrived.
+      if (strict_waypoint_tracking_ &&
+          (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET))
+      {
+        if ((end_pt_ - odom_pos_).norm() < std::min(no_replan_thresh_, 0.3))
+        {
+          ROS_INFO("Strict waypoint %d reached from odometry.", wp_id_);
+          if (wp_id_ + 1 < waypoint_num_)
+          {
+            ++wp_id_;
+            planNextWaypoint(wps_[wp_id_]);
+          }
+          else
+          {
+            have_target_ = false;
+            have_trigger_ = false;
+            changeFSMExecState(WAIT_TARGET, "WP_DONE");
+          }
+        }
+        else if (t_cur > replan_thresh_)
+          changeFSMExecState(REPLAN_TRAJ, "WP_TRACK");
+        break;
       }
 
       /* 2. 检查是否到达中间路径点 */

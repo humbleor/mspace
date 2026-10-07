@@ -29,7 +29,6 @@
 | `Modules/swarm_control/`                        | 控制与地面站，`prometheus_swarm_control`   |
 | `Modules/realsense_ros/`                        | RealSense 驱动，包含`realsense2_camera`    |
 | `Experiment/mavros/`                            | MAVROS 启动配置，`mavros_bringup`          |
-| `Simulation/mspace_drone/`                      | 额外仿真与飞控交互示例，`mspace_drone`     |
 
 `roslaunch` 和 `rosrun` 使用 ROS 包名。例如规划模块目录为 `ego_planner_swarm`，启动时使用包名 `ego_planner`。
 
@@ -76,14 +75,6 @@ mavros → msgs → fast_lio2 → ego_planner_swarm → swarm_control → realse
 ```bash
 catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 ```
-
-`Simulation/mspace_drone/` 不在默认构建脚本中，按需单独构建：
-
-```bash
-catkin_make --source Simulation/mspace_drone --build build/mspace_drone
-```
-
-其 PX4 SITL 相关示例还需对应的仿真运行环境。
 
 ## 4. 森林场景仿真
 
@@ -186,3 +177,19 @@ mkdir -p ~/data
 当前默认构建启用 `Modules/ego_planner_swarm/`；旧 `Modules/ego_planner` 构建项被注释。`drone_detect` 存在 `CATKIN_IGNORE`，当前参与构建的是 `drone_detect_lidar`。
 
 项目主要采用模块编译及 ROS 仿真/实机链路验证，没有统一的项目级自动化测试流程。编译通过仅说明构建成功，导航效果需结合森林场景中的定位、建图、避障、轨迹执行和多机运行进一步验证。
+
+## 8. 森林雷达 / LIO 离线基准
+
+使用实测 Mid-360 bag 建立原始数据审计、隔离回放、点云场景传感器生成和已知轨迹验证。
+运行入口与限制见 [使用说明](Simulation/forest_lio/README.md)，实际验证结果见
+[第一阶段实验报告](artifacts/forest_lio/historical_reports/forest_lio_phase1.md)。该离线基准用于建立参考数据，不启动飞控控制节点；在线闭环入口见下文。
+
+第二阶段已接入在线 PCD → Mid-360/IMU → Fast-LIO2 → EGO → 简化运动反馈闭环；运行步骤与限制见 [工具说明](Simulation/forest_lio/README.md)，实跑结果见 [第二阶段报告](artifacts/forest_lio/historical_reports/forest_lio_phase2.md)。
+
+森林传感器现支持 BVH 候选面查询与逐点位姿；验证及性能边界见 [渲染改进报告](Simulation/forest_lio/docs/forest_lio_renderer.md)。
+
+PX4 软件飞控在环入口已组织在 [Simulation/px4_forest](Simulation/px4_forest/README.md)，复用森林 PCD/LIO 模块并连接 Gazebo Iris 六自由度动力学。原生悬停与森林无 GPS 阶段分别验收；实际运行成功与否以每次 result.json 为准。
+
+一键启动森林仿真：`bash Simulation/start.sh`（完整 15 点任务），短程检查：`bash Simulation/start.sh short`。
+
+仿真代码已统一到 [Simulation](Simulation/README.md)：`python3 Simulation/run.py` 提供数据准备、轻量闭环和 `px4` 物理闭环入口，完整流程与启动命令见该目录说明。

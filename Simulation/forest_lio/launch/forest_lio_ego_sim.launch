@@ -1,0 +1,28 @@
+<?xml version="1.0" ?>
+<launch>
+  <arg name="output_root"/>
+  <arg name="planner_odom_topic" default="/replay/lio/odom"/>
+  <arg name="planner_config" default="$(dirname)/../config/ego_local.yaml"/>
+  <include file="$(dirname)/mapping_mid360_replay.launch">
+    <arg name="output_root" value="$(arg output_root)"/>
+    <arg name="lidar_topic" value="/sim/mid360/lidar"/>
+    <arg name="imu_topic" value="/sim/mid360/imu"/>
+  </include>
+  <node pkg="ego_planner" name="uav_1_ego_planner_node" type="ego_planner_node" output="screen" required="true">
+    <remap from="~odom_world" to="$(arg planner_odom_topic)"/>
+    <remap from="~planning/bspline" to="/sim/planning/bspline"/>
+    <remap from="~planning/data_display" to="/uav1/planning/data_display"/>
+    <remap from="~planning/broadcast_bspline_from_planner" to="/broadcast_bspline"/>
+    <remap from="~planning/broadcast_bspline_to_planner" to="/broadcast_bspline"/>
+    <remap from="~grid_map/odom" to="/replay/lio/odom"/>
+    <remap from="~grid_map/cloud" to="/replay/lio/cloud"/>
+    <remap from="~grid_map/pose" to="/uav1/unused"/>
+    <remap from="~grid_map/depth" to="/uav1/unused"/>
+    <rosparam command="load" file="$(arg planner_config)"/>
+  </node>
+  <node pkg="ego_planner" type="traj_server" name="forest_traj_server" output="screen" required="true">
+    <remap from="~planning/bspline" to="/sim/planning/bspline"/>
+    <remap from="/position_cmd" to="/sim/position_cmd"/>
+    <param name="traj_server/time_forward" value="0.0"/>
+  </node>
+</launch>

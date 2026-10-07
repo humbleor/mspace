@@ -49,7 +49,6 @@ catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 | `Modules/swarm_control/` | `prometheus_swarm_control` | 控制与地面站 |
 | `Modules/realsense_ros/` | 包含 `realsense2_camera` 等包 | 相机驱动 |
 | `Experiment/mavros/` | `mavros_bringup` | PX4 MAVROS 启动配置 |
-| `Simulation/mspace_drone/` | `mspace_drone` | 额外仿真工具 |
 
 规划子包直接位于 `Modules/ego_planner_swarm/` 下，不存在原说明中的 `src/planner/` 层级：
 
@@ -112,6 +111,6 @@ roslaunch drone_detect_lidar 2uav_lidar_detect_sim.launch # 双机雷达检测
 - launch/参数修改检查包名、include 路径、参数、话题与坐标系，具备条件时验证对应单机或多机仿真。
 - 仅修改文档时核对描述和命令，无需完整编译或启动飞行节点。
 - 当前启用的规划模块为 `Modules/ego_planner_swarm/`；compile.sh 中 `Modules/ego_planner` 构建项被注释。
-- `Simulation/mspace_drone/` 不在 compile.sh 中，需按需单独构建并检查 PX4 SITL 等依赖。
+- PX4 森林入口为 `Simulation/start.sh` / `Simulation/run.py px4`；PX4 与 Gazebo 物理插件通过 `px4 build` 单独构建，不在 compile.sh 中。
 - 当前 `.gitignore` 的 `AGENTS.md` 忽略项被注释，文件未被该规则忽略，跟踪状态以 `git status` 为准。
 - 保留已有用户修改，不擅自提交、恢复或改动无关文件。

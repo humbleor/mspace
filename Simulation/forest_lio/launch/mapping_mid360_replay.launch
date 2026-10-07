@@ -1,0 +1,37 @@
+<launch>
+  <arg name="lidar_topic" default="/livox/lidar_192_168_2_181"/>
+  <arg name="imu_topic" default="/livox/imu_192_168_2_181"/>
+  <arg name="output_root"/>
+  <arg name="config" default="$(find fast_lio)/config/mid360.yaml"/>
+  <arg name="point_filter_num" default="3"/>
+  <arg name="filter_size" default="0.5"/>
+  <arg name="save_pcd" default="false"/>
+  <arg name="pcd_interval" default="100"/>
+  <param name="use_sim_time" value="true"/>
+  <group ns="forest_lio_replay">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="output_root" value="$(arg output_root)"/>
+    <param name="common/lid_topic" value="$(arg lidar_topic)"/>
+    <param name="common/imu_topic" value="$(arg imu_topic)"/>
+    <param name="feature_extract_enable" value="false"/>
+    <param name="point_filter_num" value="$(arg point_filter_num)"/>
+    <param name="max_iteration" value="3"/>
+    <param name="filter_size_surf" value="$(arg filter_size)"/>
+    <param name="filter_size_map" value="$(arg filter_size)"/>
+    <param name="cube_side_length" value="1000"/>
+    <param name="runtime_pos_log_enable" value="true"/>
+    <param name="publish/traj_save_en" value="true"/>
+    <param name="publish/scan_publish_en" value="true"/>
+    <param name="pcd_save/pcd_save_en" value="$(arg save_pcd)"/>
+    <param name="pcd_save/interval" value="$(arg pcd_interval)"/>
+    <node pkg="fast_lio" type="fastlio_mapping" name="mapping" output="screen">
+      <remap from="/drone_Odometry" to="/replay/lio/odom"/>
+      <remap from="/drone_Odom_high_freq" to="/replay/lio/odom_high_freq"/>
+      <remap from="/drone_cloud_registered" to="/replay/lio/cloud"/>
+      <remap from="/drone_cloud_registered_body" to="/replay/lio/cloud_body"/>
+      <remap from="/drone_cloud_effected" to="/replay/lio/cloud_effected"/>
+      <remap from="/drone_Laser_map" to="/replay/lio/map"/>
+      <remap from="/drone_path" to="/replay/lio/path"/>
+    </node>
+  </group>
+</launch>

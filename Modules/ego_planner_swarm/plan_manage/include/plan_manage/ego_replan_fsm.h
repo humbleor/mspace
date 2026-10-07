@@ -68,6 +68,7 @@ namespace ego_planner
     double planning_horizen_, planning_horizen_time_;
     double emergency_time_;
     bool flag_realworld_experiment_;
+    bool strict_waypoint_tracking_; // Confirm each mission point from odometry.
     bool enable_fail_safe_;
 
     /* planning data */

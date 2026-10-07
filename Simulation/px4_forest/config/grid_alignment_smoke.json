@@ -1,0 +1,19 @@
+{
+  "waypointDistriFlag": 0,
+  "grid_direction": 0,
+  "x": {
+    "min": 0,
+    "max": 4,
+    "step": 2
+  },
+  "y": {
+    "min": 0,
+    "max": 2,
+    "step": 2
+  },
+  "z": {
+    "min": 2,
+    "max": 2,
+    "step": 2
+  }
+}
