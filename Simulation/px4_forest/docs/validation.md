@@ -1,5 +1,50 @@
 # 当前 PX4 森林网格验收
 
+## 仿真地图内存修复（2026-10-13）
+
+完整网格仿真由任务范围和规划余量生成 96×64×10 m 地图，分辨率 0.1 m、膨胀 0.25 m 保持不变；原实机模板保留。74 项测试通过。双窗口完整网格配置运行 40 s，EGO RSS 约 1.0 GiB、VmSwap=0，并正常进入 OFFBOARD 和任务；因限时未走完整路线，任务结果仍为 failed，不能当作 15 点通过证据。详见 [内存修复记录](map_memory.md)。
+
+
+## PCD 物理碰撞接入与四组接触验证（2026-10-12）
+
+当前森林入口默认加载圆柱代理并检查真实 Iris 接触，接触即 failed；名义距离仍使用 EGO 参数。最终模型含 29 树干代理、76 矮干片段和 11 粗枝候选，共 116 个形状，未识别几何仍是覆盖限制。独立正面、擦边、旁路、6 m/s 撞击均通过；单机无窗口 0.25 倍速森林短程通过，传感器 P95 约 41.7 ms、最大积压 0.224 s、接触观察器最大间隔 4 ms。显式初始接触夹具验证 failed/非零退出及报告保存；不能当作自然森林的碰撞次数。
+
+69 项测试、Gazebo 插件构建与 ./compile.sh 六模块均通过。数据、运行命令、坐标核验和未建模边界见 [森林物理碰撞报告](forest_physical_collision.md)。下文为此前阶段证据，不代表当前完整网格或 1 倍速已验证。
+
+## EGO 参数验收、历史定位与单根树干物理测试（2026-10-12）
+
+按用户约定默认改为 EGO 实际 obstacles_inflation 名义距离（当前 0.25 m），不叠加机体或 surfel 半径。该径向检查与原 cloudCallback 的 XY 三格/Z 一格栅格膨胀不完全等价，报告明确边界；原保守 proxy 模式保留为可选，并保留之前全部报告。
+
+历史六目标在当前标准下 clear（最小净间距 +0.32424 m）；15 目标仍有一个 129.32–130.96 s 距离不足区间（−0.20673 m）。定位/参考轨迹和证据边界见 [历史原因定位](clearance_diagnosis.md)，不能将下文旧 proxy 失败与当前标准混称。
+
+单根树干插件 CMake 构建通过；真实 Gazebo 正面接触/旁路两组均通过，接触力改变机体运动，并非软件判定后强制停机。此为零重力刚体接触测试，不是 PX4 导航飞行实验。详见 [单根树干场景](single_trunk.md)。本次 60 项仿真测试通过（森林 28、PX4/碰撞/树干 32）。
+
+新默认 EGO 模式的无窗口 0.25 倍速短程闭环通过，退出码 0，报告保存实际读取的 EGO 参数，导航发布者和真值隔离审计通过。
+
+- [新默认短程报告](../../../artifacts/px4_forest/ego_clearance_short_20261012/report.md)
+- [新默认短程距离证据](../../../artifacts/px4_forest/ego_clearance_short_20261012/collision_evidence.json)
+
+## 新增碰撞验收（2026-10-12）
+
+森林入口新增扫掠球与 PCD 障碍代理的独立验收，细节见 [碰撞验收说明](collision_acceptance.md)。下文 2026-10-07 的 ok 是历史导航验收结果，尚未包含这一新条件。
+
+使用 0.4 m 机体包络、0.2 m 障碍代理和最大 0.05 s 真值间隔，复核历史轨迹：六目标最小净间距约 −0.0258 m，首次相交约 37.588 s；完整 15 目标最小净间距约 −0.5567 m，首次相交约 36.789 s。两者在该保守代理模型下均未通过碰撞验收，不修改历史 result.json，也不把代理相交称为实际撞树。点云约 100.6 万点，轨迹未抽稀，分别检查 22,643 和 114,250 段。
+
+- [六目标碰撞复核](../../../artifacts/px4_forest/collision_acceptance_20261012/six_goal_final_evidence.json)
+- [15 目标碰撞复核](../../../artifacts/px4_forest/collision_acceptance_20261012/fifteen_goal_evidence.json)
+
+新增 10 项几何/证据测试，与现有套件共 53 项通过。首次新短程半速实验触发原有 0.4 s 传感器积压保护，整体 failed，仍保存碰撞证据和失败报告；不能作为完整任务通过记录。
+
+随后四分之一速无窗口短程闭环通过，入口退出码 0，result.status=ok、collision.status=clear。完整检查 9,271 段，最小净间距约 0.0362 m；采用同一 0.4 / 0.2 m 模型，未修改定位、规划、控制或避障参数。此短程结果不升级为六点/15 点任务通过。
+
+- [新增短程通过报告](../../../artifacts/px4_forest/collision_short_quarter_20261012/report.md)
+- [新增短程碰撞证据](../../../artifacts/px4_forest/collision_short_quarter_20261012/collision_evidence.json)
+
+负向集成采用相同短程任务和 0.25 倍速，仅将本次验收机体半径放大到 1 m（不是默认机体尺寸）。目标已到达，仍因碰撞项 failed 返回退出码 1，错误为 `Forest collision acceptance failed: collision`，并正常保存报告；证明航点通过不能绕过碰撞门槛。
+
+- [负向集成报告](../../../artifacts/px4_forest/collision_negative_quarter_20261012/report.md)
+- [负向集成结果](../../../artifacts/px4_forest/collision_negative_quarter_20261012/result.json)
+
 当前入口使用原 Modules 节点和显式严格航点模式；仅这里列出的运行作为当前网格验收证据。环境为 Ubuntu 20.04、ROS Noetic、Gazebo Classic 11、PX4 v1.13.2。
 
 ## 严格航点任务修复与两组网格验收（2026-10-07）

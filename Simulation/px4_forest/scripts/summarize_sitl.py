@@ -22,9 +22,13 @@ def main():
                 evidence[key]={str(int(v)):int(n) for v,n in zip(vals,counts)}
             (a.output/"ekf_evidence.json").write_text(json.dumps(evidence,indent=2)+"\n")
             if r["stage"]=="forest" and (evidence["position_reliant_on_gps"].get("1",0) or not evidence["position_reliant_on_vision_position"].get("1",0)):
-                raise RuntimeError("ULog did not confirm GNSS-denied external position fusion")
+                if r["status"]=="ok":raise RuntimeError("ULog did not confirm GNSS-denied external position fusion")
+                evidence["validation_error"]="No confirmed external fusion; failed run may have ended before LIO initialization"
     except ImportError:
         evidence={"unavailable":"Install pyulog to inspect native EKF evidence"}
+    except Exception as exc:
+        if r["status"]=="ok":raise
+        evidence={"unavailable":type(exc).__name__+": "+str(exc)}
     frame_file=a.output/"frames.csv"
     frame_data=np.loadtxt(frame_file,delimiter=",",ndmin=2) if frame_file.stat().st_size>40 else np.empty((0,3))
     origin=float(frame_data[0,0]-.2) if frame_data.size else None
@@ -68,6 +72,8 @@ def main():
     adjustments=[{"index":int(i),"requested":requested[i].tolist(),"accepted":accepted[i].tolist(),"offset_m":float(shifts[i])} for i in np.flatnonzero(shifts>1e-6)]
     text=["# PX4 SITL validation","",f"Status: **{r['status']}**; stage: {r['stage']}.",
         f"Accepted-goal error: {r['goal_error_m']} m. Observed arrivals: {len(r['arrivals'])}/{len(r['goals'])}.",
+        f"Independent forest collision acceptance: {r.get('collision', {'status':'unavailable', 'reason':'Historical run predates collision acceptance'})}.",
+        f"Physical tree contact acceptance: {r.get('tree_contact', {'status':'unavailable'})}; geometry counts: {r.get('forest_geometry_counts',{})}.",
         f"Native module binding: {r.get('module_alignment',{})}.",
         f"Native EGO goal adjustments (not simulator-selected): {adjustments}.",
         f"Independent ordered arrivals at original requested waypoints (takeoff excluded): {requested_evidence}.",

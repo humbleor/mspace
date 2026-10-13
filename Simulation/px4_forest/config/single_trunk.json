@@ -1,0 +1,13 @@
+{
+  "trunk": {"x": 2.0, "y": 0.0, "radius": 0.2, "height": 3.0},
+  "body_height": 1.5,
+  "launch_speed": 1.5,
+  "duration": 3.0,
+  "step_size": 0.002,
+  "cases": {
+    "impact": {"y": 0.0, "contact": true},
+    "glancing": {"y": 0.4, "contact": true},
+    "bypass": {"y": 1.0, "contact": false},
+    "fast_impact": {"y": 0.0, "speed": 6.0, "contact": true}
+  }
+}

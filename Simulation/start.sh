@@ -16,6 +16,13 @@ Options for flight modes (relative paths use the project root):
   --template-bag PATH   Mid-360 bag used for scanning patterns.
   --waypoints PATH      Custom grid JSON for full/small modes.
   --instance ID         Isolated PX4 instance (default 20).
+  --body-radius METRES  Proxy mode body sphere (default 0.4).
+  --collision-model ego|proxy  Default ego: use actual planner inflation parameter.
+  --obstacle-radius METRES  Proxy mode obstacle sphere (default/minimum 0.2).
+  --max-truth-gap SECONDS  Collision evidence sampling limit (default 0.05).
+  --forest-geometry PATH  Reuse a matching extracted geometry.json.
+  --no-tree-collision     Explicit comparison with physical tree collision disabled.
+  --keep-contact-open     Pause on tree contact and preserve GUI for inspection.
   --gui both|gazebo|rviz|none   Default both; --headless selects none.
   --no-keep-open        Exit after success; default pauses with GUI for inspection.
   --keep-open           Keep successful GUI run open.
@@ -32,6 +39,9 @@ case "$mode" in full|small|short|hover|test|build) ;; *) usage; die "Unknown mod
 scene="$PROJECT_ROOT/artifacts/forest_lio/route_125_155.json"
 bag="$HOME/bagfiles/yxb_20260208-104116.bag"
 speed=.5; duration=""; output=""; waypoints=""; instance=20; gui=both; keep_open=1; dry_run=0
+body_radius=.4; obstacle_radius=.2; max_truth_gap=.05
+collision_model=ego
+forest_geometry=""; tree_collision=1; keep_contact_open=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -42,6 +52,13 @@ while [[ $# -gt 0 ]]; do
     --template-bag) need_value "$@"; bag="$2"; shift 2 ;;
     --waypoints) need_value "$@"; waypoints="$2"; shift 2 ;;
     --instance) need_value "$@"; instance="$2"; shift 2 ;;
+    --body-radius) need_value "$@"; body_radius="$2"; shift 2 ;;
+    --collision-model) need_value "$@"; collision_model="$2"; shift 2 ;;
+    --obstacle-radius) need_value "$@"; obstacle_radius="$2"; shift 2 ;;
+    --max-truth-gap) need_value "$@"; max_truth_gap="$2"; shift 2 ;;
+    --forest-geometry) need_value "$@"; forest_geometry="$2"; shift 2 ;;
+    --no-tree-collision) tree_collision=0; shift ;;
+    --keep-contact-open) keep_contact_open=1; shift ;;
     --gui) need_value "$@"; gui="$2"; shift 2 ;;
     --headless) gui=none; shift ;;
     --keep-open) keep_open=1; shift ;;
@@ -107,7 +124,10 @@ if [[ -e "$output" ]]; then
 fi
 command=(python3 "$PROJECT_ROOT/Simulation/run.py" px4 run --stage "$stage" --output "$output"
          --duration "$duration" --speed "$speed" --instance "$instance" --gui "$gui")
-if [[ "$stage" == forest ]]; then command+=(--scene "$scene" --template-bag "$bag" "${mission[@]}"); fi
+if [[ "$stage" == forest ]]; then command+=(--scene "$scene" --template-bag "$bag" --collision-model "$collision_model" --body-radius "$body_radius" --obstacle-radius "$obstacle_radius" --max-truth-gap "$max_truth_gap" "${mission[@]}"); fi
+if [[ -n "$forest_geometry" ]]; then command+=(--forest-geometry "$forest_geometry"); fi
+if [[ "$tree_collision" == 0 ]]; then command+=(--no-tree-collision); fi
+if [[ "$keep_contact_open" == 1 ]]; then command+=(--keep-contact-open); fi
 if [[ "$keep_open" == 1 && "$gui" != none ]]; then command+=(--keep-open); fi
 printf 'Project: %s\nMode: %s\nOutput: %s\n' "$PROJECT_ROOT" "$mode" "$output"
 print_command "${command[@]}"

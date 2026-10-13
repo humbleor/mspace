@@ -8,6 +8,10 @@ import sys
 MODULE = Path(__file__).resolve().parent/"forest_lio"
 COMMANDS = {
     "px4": Path(__file__).resolve().parent/"px4_forest/run.py",
+    "collision": Path(__file__).resolve().parent/"px4_forest/scripts/collision_evidence.py",
+    "diagnose-collision": Path(__file__).resolve().parent/"px4_forest/scripts/diagnose_collision.py",
+    "single-trunk": Path(__file__).resolve().parent/"px4_forest/scripts/single_trunk.py",
+    "forest-geometry": Path(__file__).resolve().parent/"px4_forest/scripts/forest_geometry.py",
     "audit": MODULE/"scripts/audit_bag.py",
     "calibrate": MODULE/"scripts/calibrate_model.py",
     "replay": MODULE/"scripts/run_replay.py",

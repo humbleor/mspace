@@ -2,6 +2,10 @@
 
 实跑结果、性能剖析和验证边界见 [验证报告](docs/validation.md)。
 
+仿真地图现按任务与规划余量自动生成，完整网格为 96×64×10 m，避免旧 200×200×10 m 稠密缓冲造成内存耗尽；分辨率和膨胀参数不变。见 [内存修复与验证](docs/map_memory.md)。
+
+森林入口包含 [独立距离验收](docs/collision_acceptance.md) 与 [森林物理碰撞](docs/forest_physical_collision.md)：名义距离默认按 EGO 实际参数，另用拟合树干、矮干/粗枝圆柱接入 Iris 真实接触，接触即判失败。雷达仍使用完整 PCD，未拟合的几何仍是覆盖限制。历史两条路线的 [原因定位](docs/clearance_diagnosis.md)、[单树干四组物理验证](docs/single_trunk.md) 和森林短程集成证据分别记录，不能混称为完整网格通过。
+
 入口在 `Simulation/px4_forest/`，传感器渲染与森林场景数据继续复用 `Simulation/forest_lio/`。
 
 链路：模拟 Mid-360/IMU → 原 Fast-LIO2 → 原 swarm_estimator → MAVROS 外部位姿 → PX4 EKF；PX4 里程计和 LIO 点云进入原 EGO，轨迹经原 traj_server、ego_traj_to_cmd 和 swarm_controller 发送给 MAVROS/PX4，Gazebo 更新真实模拟运动。复用 Modules 的实机 launch 模板及参数，接入细节见 [原模块接入约定](docs/module_alignment.md)。
@@ -76,7 +80,7 @@ python3 Simulation/run.py px4 run --stage forest \
 
 默认 `--gui both` 自动启动 Gazebo 和 RViz，使用本次 ROS / Gazebo Master 的独立端口。图形模式需要 DISPLAY 或 WAYLAND_DISPLAY；无显示环境使用 `--headless`（等同 `--gui none`）。也可单独选择 `--gui gazebo` 或 `--gui rviz`。
 
-- Gazebo：官方 Iris 机体、电机响应和地面物理运动。当前 PCD 没有转成 Gazebo 树木碰撞几何。
+- Gazebo：官方 Iris 机体、电机响应、地面，以及默认启用的拟合树干/矮干/粗枝碰撞圆柱。--keep-contact-open 可在接触时暂停保留现场。
 - RViz：森林静态地图、LIO 实时点云、EGO 轨迹和目标；蓝色物理轨迹、橙色 LIO 轨迹、绿色 PX4 估计轨迹，以及机体姿态和飞控模式。默认配置为 `config/forest.rviz`，Fixed Frame 为 `world`。
 - `--keep-open`：任务成功后暂停物理并保留窗口，关闭窗口或 Ctrl+C 后保存结果并清理本次进程；失败仍立即退出。查看保留窗口期间，仿真时钟停止。
 
@@ -92,7 +96,7 @@ python3 Simulation/run.py px4 run --stage forest \
 
 ## 验证边界
 
-- PCD 影响激光雷达测量，目前没有树干/枝叶实体接触碰撞模型。
+- 原始 PCD 影响雷达测量，拟合圆柱参与刚性接触；低支撑/未识别几何和部分枝叶仍没有实体碰撞，木材响应未标定。
 - Iris 动力学和 IMU 尚未用你的机体、推力曲线、真实振动标定。
 - 地图未观测区域不能作为已知自由空间，覆盖证据仍只用于评估。
 - 当前入口为单机；不宣称多机闭环或实体飞控 HIL 已验证。

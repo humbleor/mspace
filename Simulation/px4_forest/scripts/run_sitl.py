@@ -19,6 +19,11 @@ from runtime_model import prepare_model
 from motion import lidar_motion
 from waypoints import load_wps
 from module_launch import prepare_modules
+from collision_evidence import collision_acceptance,ego_acceptance,validate_parameters
+from forest_geometry import extract_geometry,geometry_model
+from contact_evidence import contact_records,contact_acceptance
+
+class TreeContactDetected(RuntimeError):pass
 
 def port(socktype=socket.SOCK_STREAM):
     with socket.socket(socket.AF_INET,socktype) as s:s.bind(("127.0.0.1",0));return s.getsockname()[1]
@@ -36,6 +41,13 @@ def main():
     ap.add_argument("--takeoff-height",type=float,default=1.5)
     ap.add_argument("--speed",type=float,default=.25)
     ap.add_argument("--surface-model",choices=["fixed","adaptive"],default="fixed")
+    ap.add_argument("--body-radius",type=float,default=.4,help="Proxy mode only: conservative body/rotor sphere radius in metres")
+    ap.add_argument("--collision-model",choices=["ego","proxy"],default="ego",help="Default EGO recorded inflation clearance; proxy enables independent body sphere")
+    ap.add_argument("--obstacle-radius",type=float,default=.2,help="PCD obstacle proxy radius; at least 0.2 m to enclose sensor surfels")
+    ap.add_argument("--max-truth-gap",type=float,default=.05,help="Maximum physical truth interval for collision acceptance")
+    ap.add_argument("--forest-geometry",type=Path,help="Pre-extracted geometry.json matching this local PCD hash")
+    ap.add_argument("--no-tree-collision",action="store_true",help="Explicit legacy comparison: disable physical tree collision")
+    ap.add_argument("--keep-contact-open",action="store_true",help="Pause on tree contact and preserve active GUI windows")
     ap.add_argument("--instance",type=int,default=20)
     ap.add_argument("--waypoints",type=Path,help="generateWps grid JSON: x/y/z min,max,step; absolute local world heights")
     ap.add_argument("--goals",type=int,help="Limit route goals after takeoff for initial validation")
@@ -43,6 +55,9 @@ def main():
     ap.add_argument("--headless",dest="gui",action="store_const",const="none",help="Run without visualization windows")
     ap.add_argument("--keep-open",action="store_true",help="Pause after a successful mission for inspection; close windows or Ctrl+C to exit")
     a=ap.parse_args()
+    try:validate_parameters(a.body_radius,a.obstacle_radius,a.max_truth_gap)
+    except ValueError as exc:ap.error(str(exc))
+    if a.collision_model=="proxy" and a.obstacle_radius<.2:ap.error("--obstacle-radius must enclose the 0.2 m sensor surfel support")
     if a.stage=="forest" and not a.scene:ap.error("forest requires --scene")
     if a.waypoints and a.stage!="forest":ap.error("--waypoints requires forest stage")
     if a.goals is not None and a.goals<1:ap.error("--goals must be positive")
@@ -65,6 +80,7 @@ def main():
     goals=np.array([[0,0,1.2 if a.stage=="forest" else a.takeoff_height]],dtype=float)
     module_info={}
     renderer=None;templates=None;coverage=None;T=E=None
+    geometry=None
     if a.stage=="forest":
         waypoint_config=None
         if a.waypoints:
@@ -78,6 +94,14 @@ def main():
         write_json(out/"route_goals.json",{"frame":"world","height_origin":"initial body position","generator":"generateWps" if a.waypoints else "scene","goals":goals})
         local_map=to_local(read_pcd(scene["map"]),map_origin,world_R)
         renderer=BVHRenderer(local_map,threads=4,surface_model=a.surface_model)
+        if not a.no_tree_collision:
+            geometry=json.loads(a.forest_geometry.read_text()) if a.forest_geometry else extract_geometry(local_map)
+            import hashlib
+            digest=hashlib.sha256(np.ascontiguousarray(local_map,dtype="<f8").tobytes()).hexdigest()
+            if geometry.get("local_map_sha256")!=digest or geometry.get("frame")!="world":
+                raise ValueError("Forest collision geometry does not match local map/frame")
+            if not geometry.get("colliders"):raise ValueError("No supported forest collision shapes")
+            write_json(out/"forest_geometry.json",geometry)
         if a.gui in ("both","rviz"):
             # Display-only thinning; the sensor BVH retains the complete map.
             np.save(out/"visual_map.npy",local_map[::max(1,int(np.ceil(len(local_map)/200000)))].astype("<f4"))
@@ -105,13 +129,32 @@ def main():
     lock=threading.Lock();high=[];state=None;cmd=None;last_vision=-1;initial=None;active=-1;last_goal=-1;finished=None
     accepted_goals=goals.copy();takeoff_sent=False;trigger_sent=False;station_id=0
     started=time.monotonic();success=False;errors=[];param_checks={};graph={};armed_at=None;frame=0;next_end=None;start_sim=None
+    collision={"status":"not_applicable","passed":False,"reason":"Hover has no forest geometry"}
+    flight_end=None
+    grid_params=None
+    process_logs={}
+    tree_enabled=a.stage=="forest" and not a.no_tree_collision
+    contact_rows=[];contact_frames=0;contact_times=[];contact_event=threading.Event()
+    def assess_collision(rows):
+        if a.collision_model=="ego":
+            if grid_params is None:raise ValueError("Actual EGO grid_map parameters unavailable")
+            return ego_acceptance(local_map,rows,grid_params,a.max_truth_gap,tree=renderer.tree)
+        return collision_acceptance(local_map,rows,a.body_radius,a.obstacle_radius,a.max_truth_gap,tree=renderer.tree)
     try:
         def launch(args,name,cwd=out,critical=True):
             h=open(out/name,"w");handles.append(h)
             p=subprocess.Popen([str(x) for x in args],cwd=cwd,env=env,stdout=h,stderr=subprocess.STDOUT,start_new_session=True)
             procs.append(p)
+            process_logs[p.pid]=name
             if critical:required.append(p)
             return p
+        def check_required(phase):
+            for p in required:
+                code=p.poll()
+                if code is not None:
+                    name=process_logs.get(p.pid,"unknown")
+                    raise RuntimeError("Required process exited %s: %s (pid %s, exit %s); log: %s" %
+                                       (phase,name,p.pid,code,out/name))
         master=launch(["roscore","-p",ports["ros"]],"roscore.log")
         import xmlrpc.client
         proxy=xmlrpc.client.ServerProxy(env["ROS_MASTER_URI"])
@@ -133,6 +176,7 @@ def main():
         from std_msgs.msg import Header
         from prometheus_msgs.msg import SwarmCommand
         from visualization_msgs.msg import Marker
+        from gazebo_msgs.msg import ContactsState
         rospy.set_param("/use_sim_time",True);rospy.init_node("forest_sitl",disable_signals=True)
         mavros_topic="/uav1/mavros" if a.stage=="forest" else "/mavros"
         lio_topic="/uav1/drone_Odometry"
@@ -169,7 +213,16 @@ def main():
         def vision_cb(m):
             nonlocal last_vision
             last_vision=m.header.stamp.to_sec()
+        def contact_cb(m):
+            nonlocal contact_frames
+            rows=contact_records(m)
+            with lock:
+                contact_frames+=1
+                contact_times.append(m.header.stamp.to_sec())
+                contact_rows.extend(rows)
+            if rows:contact_event.set()
         rospy.Subscriber("/sim/plant/odom",Odometry,plant_cb,queue_size=5000)
+        if tree_enabled:rospy.Subscriber("/sim/plant/tree_contacts",ContactsState,contact_cb,queue_size=1000)
         rospy.Subscriber(mavros_topic+"/state",State,state_cb,queue_size=100)
         rospy.Subscriber(mavros_topic+"/local_position/odom",Odometry,lambda m:fcu.append(values(m)),queue_size=1000)
         rospy.Subscriber(lio_topic,Odometry,lambda m:lio.append(values(m)),queue_size=1000)
@@ -202,10 +255,36 @@ def main():
         bridge=launch(["roslaunch",out/"mavros.launch"],"mavros.log")
         deadline=time.monotonic()+80
         while not truth or truth[-1][0]<2 or state is None or not state.connected:
-            if any(p.poll() is not None for p in required):raise RuntimeError("SITL process exited during startup")
+            check_required("during startup")
             if time.monotonic()>deadline:raise RuntimeError("Physics/PX4/MAVROS startup timeout")
             time.sleep(.05)
         with lock:initial=np.asarray(truth[-1][1:4])
+        if tree_enabled:
+            # Fit in navigation-local coordinates, spawn only after the actual
+            # settled physical origin is known. Persist the exact same world.
+            from gazebo_msgs.srv import SpawnModel
+            from geometry_msgs.msg import Pose
+            root=ET.Element("sdf",version="1.6");model=geometry_model(geometry,initial);root.append(model)
+            xml=ET.tostring(root,encoding="unicode")
+            (out/"forest_collisions.sdf").write_text(xml)
+            world=ET.parse(out/"forest.world");world.getroot().find("world").append(model)
+            world.write(out/"forest.world",encoding="unicode")
+            rospy.wait_for_service("/gazebo/spawn_sdf_model",timeout=30)
+            pose=Pose();pose.orientation.w=1
+            spawned=rospy.ServiceProxy("/gazebo/spawn_sdf_model",SpawnModel)("forest_collision_geometry",xml,"",pose,"world")
+            if not spawned.success:raise RuntimeError("Forest geometry spawn failed: "+spawned.status_message)
+            from gazebo_msgs.srv import GetModelState
+            deadline=time.monotonic()+10
+            while True:
+                actual=rospy.ServiceProxy("/gazebo/get_model_state",GetModelState)("forest_collision_geometry","world")
+                if actual.success:break
+                if time.monotonic()>deadline:raise RuntimeError("Spawned forest geometry not visible in physics")
+                time.sleep(.02)
+            physical_offset=np.array([actual.pose.position.x,actual.pose.position.y,actual.pose.position.z])
+            if np.linalg.norm(physical_offset-initial)>1e-6:raise RuntimeError("Forest collision coordinate alignment failed")
+            write_json(out/"forest_geometry_alignment.json",{"frame":"world","gazebo_offset":initial,"counts":geometry["counts"],
+                       "verified_physical_offset":physical_offset,
+                       "method":"PCD map to local world, then actual settled Gazebo initial translation"})
         if a.stage=="forest":
             mapping=launch(["roslaunch",out/"modules.launch"],"navigation.log")
         if a.gui in ("both","rviz"):
@@ -219,7 +298,10 @@ def main():
         get_param=rospy.ServiceProxy(mavros_topic+"/param/get",ParamGet)
         deadline=time.monotonic()+a.duration/a.speed+180
         while rospy.Time.now().to_sec()-start_sim<a.duration:
-            if any(p.poll() is not None for p in required):raise RuntimeError("SITL process exited")
+            if contact_event.is_set():raise TreeContactDetected("Physical Iris/tree contact detected")
+            if tree_enabled and rospy.Time.now().to_sec()-start_sim>8 and not contact_frames:
+                raise RuntimeError("Tree contact observer unavailable; rebuild forest plant plugin")
+            check_required("during flight")
             if time.monotonic()>deadline:raise RuntimeError("SITL wall-clock timeout")
             for name,p in windows:
                 if p.poll() not in (None,0) and name not in ui_errors:
@@ -308,6 +390,22 @@ def main():
         success=finished is not None and np.linalg.norm(last_truth-accepted_goals[-1])<.3 and state.armed and state.mode=="OFFBOARD"
         if a.stage=="forest" and (param_checks["EKF2_AID_MASK"]!=24 or param_checks["EKF2_HGT_MODE"]!=3):raise RuntimeError("GNSS-denied EKF parameters not active")
         if not success:errors.append("Mission did not settle within the goal tolerance while armed in OFFBOARD")
+        if a.stage=="forest":
+            # Stop time before potentially expensive independent acceptance. No
+            # truth-based feedback enters navigation or sensor timing.
+            from std_srvs.srv import Empty
+            rospy.ServiceProxy("/gazebo/pause_physics",Empty)()
+            with lock:
+                flight_end=truth[-1][0]
+                collision_truth=np.asarray(truth).copy()
+            collision_truth[:,1:4]-=initial
+            grid_params=rospy.get_param("/uav_1_ego_planner_node/grid_map")
+            collision=assess_collision(collision_truth)
+            write_json(out/"collision_evidence.json",collision)
+            if not collision["passed"]:
+                success=False
+                errors.append("Forest collision acceptance failed: "+collision["status"])
+        if tree_enabled and contact_event.is_set():raise TreeContactDetected("Physical Iris/tree contact detected during final audit")
         if a.keep_open and success and any(p.poll() is None for _,p in windows):
             from std_srvs.srv import Empty
             rospy.ServiceProxy("/gazebo/pause_physics",Empty)()
@@ -315,12 +413,27 @@ def main():
             try:
                 while any(p.poll() is None for _,p in windows):time.sleep(.2)
             except KeyboardInterrupt:pass
+    except TreeContactDetected as exc:
+        errors.append(str(exc));success=False
+        from std_srvs.srv import Empty
+        try:
+            rospy.ServiceProxy("/gazebo/pause_physics",Empty)()
+            with lock:flight_end=max(truth[-1][0] if truth else 0,max((r["sim_time_s"] for r in contact_rows),default=0))
+            if a.keep_contact_open and any(p.poll() is None for _,p in windows):
+                print("Tree contact: physics paused, task FAILED. Close windows or Ctrl+C to save evidence.",flush=True)
+                try:
+                    while any(p.poll() is None for _,p in windows):time.sleep(.2)
+                except KeyboardInterrupt:pass
+        except Exception as pause_error:errors.append("Contact pause failed: "+str(pause_error))
     except KeyboardInterrupt:
         errors.append("Run interrupted")
     except Exception as exc:
         errors.append(type(exc).__name__+": "+str(exc));traceback.print_exc()
     finally:
-        flight_end = truth[-1][0] if truth else None
+        if a.stage=="forest" and grid_params is None and "rospy" in locals():
+            try:grid_params=rospy.get_param("/uav_1_ego_planner_node/grid_map")
+            except Exception:pass
+        flight_end = flight_end if flight_end is not None else truth[-1][0] if truth else None
         # Only processes created by this runner; Gazebo continues clock while navigation exits.
         for p in reversed(procs):stop(p,timeout=8)
         if "rospy" in locals():rospy.signal_shutdown("SITL complete")
@@ -334,6 +447,24 @@ def main():
         imu_rows=[r for r in imu_rows if flight_end is not None and r[0]<=flight_end]
         local=raw.copy()
         if initial is not None and len(local):local[:,1:4]-=initial
+        if a.stage=="forest" and collision["status"]=="not_applicable":
+            try:
+                if initial is None:raise ValueError("No initial physical origin")
+                collision=assess_collision(local)
+            except Exception as exc:
+                collision={"status":"unavailable","passed":False,"reason":str(exc)}
+            if not collision["passed"]:
+                success=False
+                errors.append("Forest collision acceptance failed: "+collision["status"])
+        if a.stage=="forest":write_json(out/"collision_evidence.json",collision)
+        contacts=[r for r in contact_rows if flight_end is not None and r["sim_time_s"]<=flight_end]
+        tree_contact=contact_acceptance(contacts,contact_frames,tree_enabled,contact_times,
+                                       (float(raw[0,0]),flight_end) if len(raw) else None)
+        write_json(out/"tree_contact_evidence.json",tree_contact)
+        write_json(out/"tree_contacts.json",contacts)
+        if tree_enabled and not tree_contact["passed"]:
+            success=False
+            errors.append("Physical tree contact acceptance failed: "+tree_contact["status"])
         save_trajectory(out/"truth.tum",local);est=save_trajectory(out/"lio.tum",lio);save_trajectory(out/"fcu.tum",fcu)
         save_trajectory(out/"lio_high_freq.tum",high)
         evidence=None
@@ -347,6 +478,8 @@ def main():
         np.savetxt(out/"commands.csv",np.asarray(commands).reshape(-1,4),delimiter=",",header="stamp,x,y,z")
         write_json(out/"graph.json",graph)
         write_json(out/"result.json",{"status":"ok" if success and not errors else "failed","errors":errors,"stage":a.stage,
+          "collision":collision,
+          "tree_contact":tree_contact,"forest_geometry_counts":geometry["counts"] if geometry else {},
           "visualization":{"mode":a.gui,"failed_windows":ui_errors},"flight_end_sim_s":flight_end,"goals":goals,"accepted_goals":accepted_goals,"module_alignment":module_info,"native_trigger_sent":trigger_sent,"arrivals":arrivals,"armed_at_sim_s":armed_at,"state_history":state_history,"gps_enabled":a.stage=="hover",
           "parameter_checks":param_checks,"initial_gazebo_position":initial,"final_position":local[-1,1:4] if len(local) else None,
           "goal_error_m":float(np.linalg.norm(local[-1,1:4]-accepted_goals[-1])) if len(local) else None,
@@ -356,7 +489,7 @@ def main():
           "render_wall_s":summary(render),"sensor_pipeline":{key:summary(np.asarray(pipeline)[:,i]) for i,key in enumerate(["scan_end","interpolation_wall_s","render_wall_s","transport_wall_s","total_wall_s","published_lag_sim_s"]) if i and pipeline},"wall_s":time.monotonic()-started,"footprint_evidence":evidence,
           "comparison":trajectory_comparison(est,local) if len(est)>1 and len(local)>1 else {},
           "limits":["PX4 software flight stack on computer; no physical flight controller.",
-                    "Gazebo Iris rotor dynamics; forest PCD affects lidar, not tree contact collision.",
+                    "Gazebo Iris dynamics with fitted static trunk/coarse-branch shapes; unmodeled forest remains." if tree_enabled else "Physical forest collision explicitly disabled or not applicable.",
                     "ROS LIO IMU from actual physics specific force in g; PX4 uses standard simulated IMU.",
                     "LIO/world origin based on stable initial body position; truth used only for sensor rendering and evaluation.",
                     "This isolated single-UAV test does not validate swarm flight or measured sensor realism."]})

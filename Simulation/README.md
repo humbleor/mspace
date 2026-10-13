@@ -2,6 +2,60 @@
 
 森林仿真代码全部位于 `Simulation/`。
 
+## 首次环境准备与 PX4 路径
+
+当前已验证组合为 Ubuntu 20.04 / ROS Noetic / Gazebo Classic 11 / PX4 v1.13.2。WSL 中打开 Gazebo 与 RViz 还需要可用的图形显示环境（WSLg 或 X Server）。以下命令均在 Ubuntu/WSL Bash 执行。
+
+需要先准备 ROS Noetic、Gazebo Classic 11 及其开发库、RViz、MAVROS、项目编译依赖，以及已构建的外部 `livox_ros_driver2` 工作区。Python 需要 numpy、scipy、matplotlib、PyYAML、rospkg、rosbag 和报告读取 ULog 用的 pyulog；PX4 构建还需要 git、C/C++ 工具链、CMake、Ninja 和对应 Python 构建依赖。ROS / Livox / 项目模块的安装及编译要求见 [项目 README](../README.md)。PX4 工具链参考 [PX4 v1.13 Ubuntu 开发环境](https://docs.px4.io/v1.13/en/dev_setup/dev_env_linux_ubuntu)。
+
+### PX4_Firmware 
+
+```text
+~/workspace/
+├── mspace/                     # 本项目
+│   └── artifacts/px4_forest/
+│       ├── PX4-Autopilot/       # 隔离的 PX4 源码、SITL 和 Gazebo 插件构建
+│       └── plant_build/        # 本项目 Gazebo 物理接口插件
+├── PX4_Firmware/               # 构建时使用的外部 PX4 Git 仓库
+└── ws_livox/                   # 已构建的 Livox 驱动工作区
+```
+
+- **首次构建 / 重新构建**：需要 `--source` 或 `PX4_SOURCE` 指向一个可用的 PX4 Git 仓库，包含固定提交及相应子模块；当前构建脚本即使已有隔离副本，也会读取外部源仓库的 Git / 子模块缓存。
+- **日常运行**：使用 artifacts 中已构建的隔离副本，不读取同级 PX4_Firmware。已有运行文件完整时，不需要再次构建，也不需要同级源目录来启动飞行。
+- 源目录可改名或移到其他位置。脚本复制已提交代码，不复制外部仓库未提交修改，也不修改外部仓库。
+- 当前固定 PX4 v1.13.2，提交为 `46a12a09bf11c8cbafc5ad905996645b4fe1a9df`；不要用最新 PX4 版本直接替代。
+
+### 首次准备与构建顺序
+
+如果尚无源仓库，可在默认路径新建；已有目录时先核对版本，不重复执行 clone：
+
+```bash
+cd ~/workspace
+git clone --branch v1.13.2 --recursive \
+  https://github.com/PX4/PX4-Autopilot.git PX4_Firmware
+git -C ~/workspace/PX4_Firmware rev-parse HEAD
+# 预期：46a12a09bf11c8cbafc5ad905996645b4fe1a9df
+```
+
+新环境尚未安装 PX4 工具链时，可按上述官方说明使用该版本的安装脚本；此命令会安装系统依赖，不是启动仿真：
+
+```bash
+bash ~/workspace/PX4_Firmware/Tools/setup/ubuntu.sh --no-nuttx
+```
+
+ROS Noetic 和 Livox 工作区已准备好后，先构建项目模块，再构建隔离 PX4 与本项目物理插件：
+
+```bash
+cd ~/workspace/mspace
+source /opt/ros/noetic/setup.bash
+source ~/workspace/ws_livox/devel/setup.bash
+./compile.sh                     # 必须检查最终汇总无失败
+source devel/setup.bash
+bash Simulation/start.sh build
+bash Simulation/start.sh short   # 已有森林场景时直接验证；否则先按下文准备场景
+```
+
+
 ## 完整流程
 
 ### 一、forest_lio：用真实 bag 离线准备场景
@@ -113,7 +167,7 @@ bash Simulation/start.sh             # 完整 15 点网格；半速，成功后�
 bash Simulation/start.sh small       # 六目标网格
 bash Simulation/start.sh short       # 起飞 + scene 第一个参考目标
 bash Simulation/start.sh hover       # 仅 PX4/Gazebo 悬停诊断
-bash Simulation/start.sh test        # 自动加载环境，运行全部 43 个测试
+bash Simulation/start.sh test        # 自动加载环境，运行全部仿真测试
 ```
 
 每次执行一个实验。默认生成独立的 `artifacts/px4_forest/<模式>_<时间>_<PID>/` 输出目录；成功且保留窗口时，关闭窗口或 Ctrl+C 后保存结果并自动生成 report.md、flight.png 与原请求点顺序证据。失败返回非零退出码，有 result.json 时也尝试生成失败报告。进程清理由原隔离运行器负责。
@@ -166,7 +220,7 @@ ls artifacts/px4_forest/plant_build/libmspace_forest_plant.so
 python3 Simulation/run.py px4 build --source ~/workspace/PX4_Firmware
 ```
 
-运行自动化检查，当前共 43 个测试；它们不能替代飞行实验：
+运行自动化检查；它们不能替代飞行实验：
 
 ```bash
 python3 Simulation/run.py test
@@ -271,6 +325,8 @@ RUN 是本次输出目录；换终端后先设为运行开始时打印的实际�
 
 完整通过要求 status=ok：目标按验收顺序到达，终点 LIO 距离保持小于 0.2 m 至少 3 秒仿真时间，最终物理误差小于 0.3 m，保持已解锁 OFFBOARD，参数与发布者/真值隔离审计通过。中间点以 0.5 m 半径观察到达；最近距离只说明曾接近，不能单独证明顺序。若原 EGO 重定位，通过指向 accepted_goals，不能宣称原请求坐标全部到达。
 
+森林入口还要求独立验收 `collision.passed=true`：默认按实际 EGO 障碍膨胀参数检查完整物理轨迹与 PCD 的名义安全距离，不另叠加机体球/surfel 半径；可选 proxy 模式保留原保守包络。保存最小距离位置和相交区间，距离不足或真值证据不可用判失败。参数与边界见 [单机碰撞验收](px4_forest/docs/collision_acceptance.md)，历史两条路线分析见 [原因定位](px4_forest/docs/clearance_diagnosis.md)，独立接触实验见 [单根树干物理场景](px4_forest/docs/single_trunk.md)。
+
 有窗口、日志或终点悬停不等于完整通过。任务完成前 Ctrl+C 通常记录 failed / Run interrupted；积压超过 0.4 秒仿真时间会判失败，不用旧点云或错误遮挡缓存补齐。
 
 ### 6. 窗口与排查
@@ -279,7 +335,7 @@ RUN 是本次输出目录；换终端后先设为运行开始时打印的实际�
 
 - Gazebo 显示 Iris 机体、电机响应和地面运动。
 - RViz 显示森林 PCD、实时 LIO 点云、EGO 轨迹、目标及三条轨迹：物理真值蓝色、LIO 橙色、PX4 估计绿色。Fixed Frame 为 world。
-- 树木在 RViz 展示，PCD 参与雷达遮挡查询，尚未加入 Gazebo 树木接触碰撞几何。
+- RViz 展示细致森林 PCD；Gazebo 默认加载简化树干/矮干/粗枝圆柱并参与真实接触。详见 [森林物理碰撞](px4_forest/docs/forest_physical_collision.md)，接触现场可用 --keep-contact-open 保留。
 - 可选 `--gui rviz`、`--gui gazebo`；无窗口用 `--headless`。显示抽稀不改变完整地图的射线查询。
 
 无人机不动时，检查是否 OFFBOARD/解锁、雷达帧数是否增长、是否打印任务触发，再结合 navigation.log 和 px4.log 区分初始化、起飞、定位或规划问题。飞到终点但计数停住时查看各点最近距离及 module_params 中的 strict_waypoint_tracking，确认源码已重新编译且启用严格模式；不能放宽计数来认定成功。
@@ -317,9 +373,9 @@ hover 保留模拟 GPS，由运行器直接发送悬停参考，不代表原 Fas
 - [森林地图与覆盖证据](forest_lio/docs/forest_lio_map_geometry.md)。
 - [PCD 雷达候选面与遮挡查询](forest_lio/docs/forest_lio_renderer.md)。
 
-当前是计算机上的 PX4 SITL，实体飞控 HIL 尚未接入；森林 PCD 用于雷达遮挡与测量，暂不提供树木接触碰撞。Iris 动力学和 IMU 尚未按实机标定，多机 PX4 闭环尚未验证。
+当前是计算机上的 PX4 SITL，实体飞控 HIL 尚未接入；完整 PCD 用于雷达，简化树干/矮干/粗枝参与物理接触，未拟合几何与部分枝叶仍不提供实体碰撞。Iris 动力学、接触参数和 IMU 尚未按实机标定，多机 PX4 闭环尚未验证。
 
-当前验证结果见 [验证报告](px4_forest/docs/validation.md)：43 个测试及相关规划模块构建通过，严格模式六目标与完整 15 目标双窗口网格均通过（0.5 倍速）。此前六个主模块构建通过，历史连续模式结果与当前严格模式结果分开记录。
+历史导航验证见 [验证报告](px4_forest/docs/validation.md)：2026-10-07 的 43 个测试及相关规划模块构建通过，严格模式六目标与完整 15 目标双窗口网格均通过（0.5 倍速）。这些旧记录尚未执行新增碰撞验收，不能作为含碰撞条件的通过证据。此前六个主模块构建通过，历史连续模式结果与当前严格模式结果分开记录。
 
 ## 当前可复现的网格验收结果
 
