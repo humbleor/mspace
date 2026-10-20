@@ -1,6 +1,6 @@
 """Evidence-limited PCD cylinder extraction and Gazebo collision geometry.
 
-Fits observed vertical shafts; coarse branch proxies require linear tube support.
+Fits tilted/curved trunks, anchors to observed terrain, and retains attached supported branches.
 Cylinder completion is inferred from observed support, not verified unseen surface.
 """
 import argparse
@@ -12,101 +12,47 @@ import time
 import xml.etree.ElementTree as ET
 
 import numpy as np
-from scipy.ndimage import label
-from scipy.optimize import least_squares
-from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-DEFAULTS = {"voxel":.07,"column":.25,"height_bin":.25,"min_height":1.5,
-            "min_height_bins":7,"min_points":35,"min_radius":.06,"max_radius":.55,
-            "max_fit_error":.08,"min_angular_bins":5,"branch_cell":1.,
-            "min_branch_length":.6,"max_branch_radius":.16,"max_colliders":500}
+from trunk_extraction import DEFAULTS, extract_trunks, extract_branches
 
 
 def extract_geometry(points, settings=None):
-    cfg=dict(DEFAULTS); cfg.update(settings or {})
+    cfg=dict(DEFAULTS)
+    unknown=set(settings or {})-set(cfg)
+    if unknown:raise ValueError("Unknown extraction settings: "+str(sorted(unknown)))
+    cfg.update(settings or {})
     for k,v in cfg.items():
         if not np.isfinite(v) or v<=0:raise ValueError("Positive finite extraction settings required: "+k)
+    for key in ("normal_neighbors","slice_min_points","sparse_slice_min_points","sparse_angular_bins","min_points","ransac_iterations","max_colliders","min_angular_bins"):
+        if cfg[key]!=int(cfg[key]):raise ValueError("Integer setting required: "+key)
+    if cfg["normal_neighbors"]<3 or not 3<=cfg["min_angular_bins"]<=12 or not 3<=cfg["sparse_angular_bins"]<=12 or cfg["max_tilt_deg"]>=60:
+        raise ValueError("Invalid neighborhood, angular support or tilt limit")
+    if cfg["min_radius"]>=cfg["max_radius"] or cfg["min_branch_radius"]>=cfg["max_branch_radius"]:
+        raise ValueError("Radius bounds must be ordered")
+    if any(cfg[key]>1 for key in ("normal_curvature","sparse_normal_curvature","normal_z","normal_agreement")):
+        raise ValueError("Normal thresholds must not exceed one")
     xyz=np.asarray(points,dtype=float)
-    if xyz.ndim!=2 or xyz.shape[1]!=3 or not len(xyz) or not np.isfinite(xyz).all():
-        raise ValueError("Finite nonempty Nx3 forest points required")
+    if xyz.ndim!=2 or xyz.shape[1]!=3 or len(xyz)<3 or not np.isfinite(xyz).all():
+        raise ValueError("Finite Nx3 forest points required (at least three points)")
+    if cfg["min_track_occupancy"]>1 or cfg["sparse_slice_height"]<cfg["slice_height"]:
+        raise ValueError("Invalid height occupancy or sparse slice scale")
     started=time.monotonic()
-    _,indices=np.unique(np.floor(xyz/cfg["voxel"]).astype(np.int64),axis=0,return_index=True)
-    p=xyz[np.sort(indices)]
-    keys=np.floor(p[:,:2]/cfg["column"]).astype(int)
-    zkeys=np.floor(p[:,2]/cfg["height_bin"]).astype(int)
-    occupied=np.unique(np.column_stack([keys,zkeys]),axis=0)
-    xy,count=np.unique(occupied[:,:2],axis=0,return_counts=True)
-    candidates=xy[count>=cfg["min_height_bins"]]
-    colliders=[]; rejected=[]
-    if len(candidates):
-        origin=candidates.min(axis=0); extent=candidates.max(axis=0)-origin+1
-        if np.prod(extent)>2000000:raise ValueError("Extraction extent too large")
-        mask=np.zeros(tuple(extent),dtype=bool)
-        mask[tuple((candidates-origin).T)]=True
-        labels,n=label(mask,np.ones((3,3)))
-        tree=cKDTree(p[:,:2])
-        for group in range(1,n+1):
-            cells=np.argwhere(labels==group)+origin
-            center_seed=(cells.mean(axis=0)+.5)*cfg["column"]
-            radius_search=max(.6,float(np.linalg.norm((cells.max(axis=0)-cells.min(axis=0)+1)*cfg["column"])/2+.3))
-            patch=p[tree.query_ball_point(center_seed,radius_search)]
-            if len(patch)<cfg["min_points"]:continue
-            # Use supported z bins, trimming peripheral foliage before fitting.
-            heights=np.quantile(patch[:,2],[.05,.95])
-            if heights[1]-heights[0]<cfg["min_height"]:continue
-            patch=patch[(patch[:,2]>=heights[0])&(patch[:,2]<=heights[1])]
-            initial_radius=np.clip(np.median(np.linalg.norm(patch[:,:2]-center_seed,axis=1)),cfg["min_radius"],cfg["max_radius"])
-            fit=least_squares(lambda v:np.linalg.norm(patch[:,:2]-v[:2],axis=1)-v[2],
-                              [*center_seed,initial_radius],loss="soft_l1",f_scale=.03,
-                              bounds=([center_seed[0]-radius_search,center_seed[1]-radius_search,cfg["min_radius"]],
-                                      [center_seed[0]+radius_search,center_seed[1]+radius_search,cfg["max_radius"]]))
-            center=fit.x[:2]; radius=float(fit.x[2])
-            error=np.abs(np.linalg.norm(patch[:,:2]-center,axis=1)-radius)
-            good=error<=cfg["max_fit_error"]
-            supported=patch[good]
-            angular=np.floor((np.arctan2(supported[:,1]-center[1],supported[:,0]-center[0])+np.pi)/(2*np.pi)*12).astype(int)
-            bins=len(np.unique(angular))
-            if len(supported)<cfg["min_points"] or good.mean()<.55 or bins<cfg["min_angular_bins"] or radius>=cfg["max_radius"]-.001:
-                rejected.append({"seed":center_seed.tolist(),"inlier_fraction":float(good.mean()),"angular_bins":bins})
-                continue
-            lo,hi=np.quantile(supported[:,2],[.02,.98])
-            if hi-lo<cfg["min_height"]:continue
-            colliders.append({"kind":"trunk","a":[*center,float(lo)],"b":[*center,float(hi)],
-                              "radius":radius,"support_points":len(supported),
-                              "fit_median_error_m":float(np.median(error[good])),"angular_bins":bins})
-    # Coarse branches: local PCA tube fits outside accepted trunk surfaces. Do
-    # not fit canopy blobs or bridge distant observations into large meshes.
-    keep=np.ones(len(p),dtype=bool)
-    for c in colliders:
-        keep &= ~((np.linalg.norm(p[:,:2]-np.asarray(c["a"][:2]),axis=1)<c["radius"]+.12)&
-                  (p[:,2]>=c["a"][2]-.1)&(p[:,2]<=c["b"][2]+.1))
-    remaining=p[keep]
-    if len(remaining):
-        keys=np.floor(remaining/cfg["branch_cell"]).astype(int)
-        unique,inverse,counts=np.unique(keys,axis=0,return_inverse=True,return_counts=True)
-        order=np.argsort(inverse); starts=np.r_[0,np.cumsum(counts)]
-        for i in np.flatnonzero(counts>=25):
-            patch=remaining[order[starts[i]:starts[i+1]]]
-            center=patch.mean(axis=0); covariance=np.cov((patch-center).T)
-            eig,vec=np.linalg.eigh(covariance); axis=vec[:,-1]
-            if eig[-1]<8*max(eig[-2],1e-9):continue
-            projection=(patch-center)@axis
-            radial=np.linalg.norm(patch-center-projection[:,None]*axis,axis=1)
-            radius=float(np.quantile(radial,.9)); low,high=np.quantile(projection,[.02,.98])
-            if radius<.035 or radius>cfg["max_branch_radius"] or high-low<cfg["min_branch_length"]:continue
-            kind="stem" if abs(axis[2])>.85 else "branch"
-            colliders.append({"kind":kind,"a":(center+low*axis).tolist(),"b":(center+high*axis).tolist(),
-                              "radius":radius,"support_points":len(patch),"fit_method":"local PCA tube proxy",
-                              "pca_linearity":float(eig[-1]/max(eig[-2],1e-9))})
+    trunks,rejected,p,n,curvature,surface,stats=extract_trunks(xyz,cfg)
+    branches,branch_stats=extract_branches(p,n,surface,trunks,cfg)
+    colliders=trunks+branches
     if len(colliders)>cfg["max_colliders"]:raise ValueError("Collider budget exceeded; no silent truncation")
-    return {"schema_version":1,"frame":"world","source_points":len(xyz),"fit_points":len(p),
+    stats.update(branch_stats)
+    return {"schema_version":3,"frame":"world","source_points":len(xyz),"fit_points":len(p),
             "local_map_sha256":hashlib.sha256(np.ascontiguousarray(xyz,dtype="<f8").tobytes()).hexdigest(),
             "parameters":cfg,"colliders":colliders,"rejected_trunk_candidates":rejected,
-            "counts":{k:sum(c["kind"]==k for c in colliders) for k in ("trunk","stem","branch")},
-            "extraction_wall_s":time.monotonic()-started,
-            "limits":["Cylinders complete observed arcs by assumption; rejected or unseen geometry remains unmodeled.",
-                      "Branch PCA candidates and trunk fits are not semantic ground truth.",
+            "candidate_diagnostics":stats.pop("candidate_diagnostics"),
+            "counts":dict(trunk=len(trunks),stem=0,branch=len(branches),trees=stats["accepted_trees"],
+                          grounded_trees=stats["grounded_trees"],observed_only_trees=stats["observed_only_trees"]),
+            "extraction_statistics":stats,"extraction_wall_s":time.monotonic()-started,
+            "limits":["Cylinders infer unseen surfaces; fitting residuals are not semantic ground truth.",
+                      "Missing terrain never removes measured wood; only supported bases are extended.",
+                      "Detached, weak, rejected or unseen geometry remains unmodeled.",
                       "No foliage flexibility, structural damage or calibrated wood response."]}
 
 
@@ -124,19 +70,21 @@ def geometry_model(geometry, offset=(0,0,0)):
         pose=np.r_[(a+b)/2,rotation.as_euler("xyz")]
         link=ET.SubElement(model,"link",name=f"{c['kind']}_{i:04d}")
         ET.SubElement(link,"pose").text=" ".join(map(str,pose))
-        for kind in ("collision","visual"):
-            item=ET.SubElement(link,kind,name=kind)
-            cylinder=ET.SubElement(ET.SubElement(item,"geometry"),"cylinder")
-            ET.SubElement(cylinder,"radius").text=str(c["radius"])
-            ET.SubElement(cylinder,"length").text=str(length)
-            if kind=="collision":
-                surface=ET.SubElement(item,"surface")
-                ode=ET.SubElement(ET.SubElement(surface,"contact"),"ode")
-                for key,value in {"kp":1e6,"kd":100,"max_vel":1,"min_depth":.0001}.items():
-                    ET.SubElement(ode,key).text=str(value)
-            else:
-                material=ET.SubElement(item,"material")
-                ET.SubElement(material,"diffuse").text="0.35 0.19 0.08 1"
+        item=ET.SubElement(link,"collision",name="collision")
+        cylinder=ET.SubElement(ET.SubElement(item,"geometry"),"cylinder")
+        ET.SubElement(cylinder,"radius").text=str(c["radius"])
+        ET.SubElement(cylinder,"length").text=str(length)
+        surface=ET.SubElement(item,"surface")
+        ode=ET.SubElement(ET.SubElement(surface,"contact"),"ode")
+        for key,value in {"kp":1e6,"kd":100,"max_vel":1,"min_depth":.0001}.items():
+            ET.SubElement(ode,key).text=str(value)
+        # Legacy unverified proxies stay hidden; v2 publishes only screened tree geometry.
+        if geometry.get("schema_version",1)>=2:
+            visual=ET.SubElement(link,"visual",name="visual")
+            ET.SubElement(visual,"geometry").append(ET.fromstring(ET.tostring(cylinder)))
+            material=ET.SubElement(visual,"material")
+            ET.SubElement(material,"ambient").text="0.28 0.16 0.08 1"
+            ET.SubElement(material,"diffuse").text="0.38 0.23 0.12 1"
     return model
 
 
@@ -158,14 +106,56 @@ def plot_geometry(points,geometry,path):
     axes[0].set(xlabel="local x (m)",ylabel="local y (m)");axes[0].set_aspect("equal")
     axes[1].set(xlabel="local x (m)",ylabel="local z (m)")
     for ax in axes:ax.grid(True)
-    fig.suptitle(f"PCD proxies: {geometry['counts']['trunk']} trunks / {geometry['counts'].get('stem',0)} short stems / {geometry['counts']['branch']} branches")
+    fig.suptitle(f"PCD fit: {geometry['counts'].get('trees',0)} trees / {geometry['counts']['trunk']} trunk segments / {geometry['counts']['branch']} attached branches")
     fig.tight_layout(rect=[0,0,1,.94]);fig.savefig(path,dpi=150);plt.close(fig)
+
+
+def plot_tree_details(points,geometry,path):
+    """Orthogonal PCD/cylinder overlays for the three longest accepted trees."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    if not geometry['colliders']:return
+    p=points;g=geometry
+    trees={}
+    for c in g['colliders']:
+        if c['kind']=='trunk':trees.setdefault(c['tree_id'],[]).append(c)
+    ids=sorted(trees,key=lambda i:sum(np.linalg.norm(np.array(c['b'])-c['a']) for c in trees[i]),reverse=True)[:3]
+    fig=plt.figure(figsize=(15,6))
+    for j,i in enumerate(ids):
+        cs=trees[i];a=np.array(cs[0]['a']);b=np.array(cs[-1]['b'])
+        center=(a+b)/2
+        mask=(np.linalg.norm(p[:,:2]-center[:2],axis=1)<1.5)&(p[:,2]>a[2]-.4)&(p[:,2]<b[2]+.6)
+        q=p[mask];q=q[::max(1,int(np.ceil(len(q)/16000)))]
+        ax=fig.add_subplot(1,3,j+1)
+        horizontal=int(np.argmax(abs(b[:2]-a[:2])))
+        ax.scatter(q[:,horizontal],q[:,2],s=.6,c='gray',alpha=.25)
+        for c in cs:
+            aa=np.array(c['a']);bb=np.array(c['b']);d=bb-aa;axis=d/np.linalg.norm(d)
+            u=np.cross(axis,[0.,1,0]);u/=np.linalg.norm(u);v=np.cross(axis,u)
+            theta=np.linspace(0,2*np.pi,25)
+            for t in np.linspace(0,1,6):
+                ring=aa+t*d+c['radius']*(np.cos(theta)[:,None]*u+np.sin(theta)[:,None]*v)
+                ax.plot(ring[:,horizontal],ring[:,2],c='saddlebrown',lw=.7)
+            ax.plot([aa[horizontal],bb[horizontal]],[aa[2],bb[2]],c='red',lw=1)
+        ground=cs[0].get('ground')
+        if ground is not None:
+            gx,gy,gz=ground['coefficients'];ref=np.array(ground['point'])
+            coords=np.linspace(ref[horizontal]-.6,ref[horizontal]+.6,5)
+            ax.plot(coords,gz+ground['coefficients'][horizontal]*(coords-ref[horizontal]),color='green',lw=1)
+        ax.set(xlabel='local '+('x' if horizontal==0 else 'y')+' (m)',ylabel='local z (m)',
+               title='Tree %d: %d connected segments\nmedian radial error %.3f m'%(i,len(cs),np.median([c['fit_median_error_m'] for c in cs])))
+        ax.set_aspect('equal');ax.grid(alpha=.2)
+    fig.suptitle('Observed PCD (gray), fitted cylinders (brown), axis (red), local terrain fit (green)')
+    fig.tight_layout(rect=[0,0,1,.88]);fig.savefig(path,dpi=140);plt.close(fig)
+
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scene",type=Path,required=True);p.add_argument("--output",type=Path,required=True)
     p.add_argument("--takeoff-height",type=float,default=1.5)
+    p.add_argument("--compare-geometry",type=Path,help="Baseline geometry JSON for same-PCD support comparison")
     a=p.parse_args()
     if a.output.exists():p.error("Use a new output directory")
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"forest_lio/scripts"))
@@ -179,6 +169,11 @@ def main():
     root=ET.Element("sdf",version="1.6");root.append(geometry_model(geometry))
     ET.ElementTree(root).write(a.output/"forest_collisions.sdf",encoding="unicode")
     plot_geometry(points,geometry,a.output/"geometry_overview.png")
+    plot_tree_details(points,geometry,a.output/"tree_closeups.png")
+    from geometry_diagnostics import write_candidate_diagnostics,compare_geometry
+    write_candidate_diagnostics(points,geometry,a.output)
+    if a.compare_geometry:
+        compare_geometry(points,json.loads(a.compare_geometry.read_text()),geometry,a.output)
     print(json.dumps(geometry["counts"]));print(a.output/"geometry.json")
     if not geometry["counts"]["trunk"]:raise SystemExit("No supported trunks found")
 

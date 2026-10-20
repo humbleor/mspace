@@ -362,7 +362,16 @@ python3 Simulation/run.py px4 run --stage hover \
 
 hover 保留模拟 GPS，由运行器直接发送悬停参考，不代表原 Fast-LIO2、EGO 和控制模块测试。当前入口只验证单机。
 
-其他工具包括 audit、replay、generate、coverage、prepare-scene、closed-loop、profile。用 `python3 Simulation/run.py COMMAND --help` 查看参数；飞行参数用 `python3 Simulation/run.py px4 run --help`。轻量 closed-loop 保留历史参数，不替代本节原模块物理闭环验收。
+### 命令速查
+
+`Simulation/run.py` 将命令转交给对应脚本。按工作流分组如下：
+
+- PX4 森林仿真与碰撞验证：`px4`、`collision`、`diagnose-collision`、`single-trunk`、`forest-geometry`。
+- 数据准备与回放：`audit`、`calibrate`、`generate`、`replay`、`surfaces`、`prepare-scene`、`coverage`。
+- 轻量闭环与性能分析：`closed-loop`、`benchmark`、`profile`、`report-route`、`report-map`、`report-renderer`。
+- 自动化检查：`test`，运行 forest_lio 与 PX4 两套检查。
+
+查看命令参数：`python3 Simulation/run.py COMMAND --help`；PX4 子命令参数：`python3 Simulation/run.py px4 run --help`。轻量 `closed-loop` 使用独立的运动学反馈模型，不能替代本节的 PX4/Gazebo 原模块闭环验收。
 
 ## 文档与边界
 
@@ -375,7 +384,7 @@ hover 保留模拟 GPS，由运行器直接发送悬停参考，不代表原 Fas
 
 当前是计算机上的 PX4 SITL，实体飞控 HIL 尚未接入；完整 PCD 用于雷达，简化树干/矮干/粗枝参与物理接触，未拟合几何与部分枝叶仍不提供实体碰撞。Iris 动力学、接触参数和 IMU 尚未按实机标定，多机 PX4 闭环尚未验证。
 
-历史导航验证见 [验证报告](px4_forest/docs/validation.md)：2026-10-07 的 43 个测试及相关规划模块构建通过，严格模式六目标与完整 15 目标双窗口网格均通过（0.5 倍速）。这些旧记录尚未执行新增碰撞验收，不能作为含碰撞条件的通过证据。此前六个主模块构建通过，历史连续模式结果与当前严格模式结果分开记录。
+当前验证结果和适用边界见 [PX4 森林仿真验证](px4_forest/docs/validation.md)。六目标与完整 15 目标严格模式网格已在 0.5 倍速通过；导航验收与森林物理碰撞覆盖是不同验收项。
 
 ## 当前可复现的网格验收结果
 

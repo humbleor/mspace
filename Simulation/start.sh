@@ -76,6 +76,7 @@ for setup in "$ros_setup" "$livox_workspace/devel/setup.bash" "$PROJECT_ROOT/dev
   source "$setup"
 done
 set -u
+export DISABLE_ROS1_EOL_WARNINGS=1
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=4
 print_command() { printf 'Command:'; printf ' %q' "$@"; printf '\n'; }
@@ -133,8 +134,27 @@ printf 'Project: %s\nMode: %s\nOutput: %s\n' "$PROJECT_ROOT" "$mode" "$output"
 print_command "${command[@]}"
 if [[ "$dry_run" == 1 ]]; then exit 0; fi
 set +e
-"${command[@]}"
-run_status=$?
+runner_pid=""
+forward_stop() {
+  if [[ -n "$runner_pid" ]] && kill -0 "$runner_pid" 2>/dev/null; then
+    kill -s "$1" "$runner_pid" 2>/dev/null || true
+  fi
+}
+trap 'forward_stop INT' INT
+trap 'forward_stop TERM' TERM
+# Give the controller its own session: terminal Ctrl+C reaches this shell,
+# which forwards one signal, avoiding duplicate delivery during finalization.
+setsid "${command[@]}" &
+runner_pid=$!
+# wait may itself be interrupted by a trap. Keep waiting for the runner's
+# cleanup; never leave it orphaned after forwarding a terminal signal.
+while true; do
+  wait "$runner_pid"
+  run_status=$?
+  if ! kill -0 "$runner_pid" 2>/dev/null; then break; fi
+done
+runner_pid=""
+trap '' INT TERM
 set -e
 report_status=0
 if [[ -f "$output/result.json" ]]; then

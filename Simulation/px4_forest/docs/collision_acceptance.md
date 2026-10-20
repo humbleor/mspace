@@ -47,4 +47,4 @@ python3 Simulation/run.py collision artifacts/px4_forest/grid_strict_visual \
 
 历史导航任务的 ok 不自动升级为碰撞验收通过。新增测试包含两端安全但中间穿越、切触、机体侧面相交、初始相交、静止运动、首次接触顺序、采样缺失，以及与全量几何计算对照。
 
-按 EGO 参数的两条历史路线诊断见 [原因定位](clearance_diagnosis.md)：六点通过；15 点存在一个名义距离不足区间。旧 proxy 结果仍保留，不能与当前标准混称。
+距离检查仅代表静态 PCD 上按当前 EGO 膨胀参数计算的名义间距；它不能替代局部实时占据状态或 Gazebo 物理接触结果。森林几何覆盖范围和任务验收边界见[当前验证](validation.md)。

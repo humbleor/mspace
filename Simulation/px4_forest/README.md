@@ -2,9 +2,11 @@
 
 实跑结果、性能剖析和验证边界见 [验证报告](docs/validation.md)。
 
-仿真地图现按任务与规划余量自动生成，完整网格为 96×64×10 m，避免旧 200×200×10 m 稠密缓冲造成内存耗尽；分辨率和膨胀参数不变。见 [内存修复与验证](docs/map_memory.md)。
+仿真地图按任务与规划余量自动生成；已验证的完整网格为 96×64×10 m。分辨率和膨胀参数沿用实机模板。见 [规划地图内存](docs/map_memory.md)。
 
-森林入口包含 [独立距离验收](docs/collision_acceptance.md) 与 [森林物理碰撞](docs/forest_physical_collision.md)：名义距离默认按 EGO 实际参数，另用拟合树干、矮干/粗枝圆柱接入 Iris 真实接触，接触即判失败。雷达仍使用完整 PCD，未拟合的几何仍是覆盖限制。历史两条路线的 [原因定位](docs/clearance_diagnosis.md)、[单树干四组物理验证](docs/single_trunk.md) 和森林短程集成证据分别记录，不能混称为完整网格通过。
+森林入口包含 [独立距离验收](docs/collision_acceptance.md) 与 [森林物理碰撞](docs/forest_physical_collision.md)：名义距离读取 EGO 实际参数；拟合树干及通过支撑筛选的连接枝段接入 Iris 真实接触，接触即判失败。雷达仍使用完整 PCD，未拟合的几何仍是覆盖限制。
+
+树干提取采用[多尺度覆盖补检](docs/trunk_extraction.md)，保留无地面证据但有实测支撑的树段，按稀疏程度调整法线筛选、跨尺度去重并记录候选诊断；支持倾斜、弯曲分段和有限地面补全，不输出独立短段。
 
 入口在 `Simulation/px4_forest/`，传感器渲染与森林场景数据继续复用 `Simulation/forest_lio/`。
 
@@ -17,6 +19,8 @@
 ## 一键运行
 
 从任意目录执行项目内的 `Simulation/start.sh`，脚本自动切换到项目根目录并加载环境。默认完整网格：`bash Simulation/start.sh`；六点：`bash Simulation/start.sh small`；短程：`bash Simulation/start.sh short`。选项与离线准备流程见 [统一说明](../README.md)。
+
+按 Ctrl+C 后入口会等待本次 PX4、RViz 和 ROS 后代进程清理，再保存报告；等到 Process cleanup: complete 和提示符返回。旧残留可用 python3 Simulation/run.py px4 stop --output "$RUN" 按目录清理，方法和验证见 [退出与清理](docs/process_cleanup.md)。
 
 ## 环境与构建
 

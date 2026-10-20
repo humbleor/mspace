@@ -29,7 +29,7 @@ python3 Simulation/run.py single-trunk --build \
 
 输出保存 single_trunk.world、states.csv、contacts.csv、gazebo.log、response.png、result.json 和 report.md。
 
-## 2026-10-12 实跑
+## 实跑结果
 
 正面测试首次接触约 1.046 s，终点 x≈1.547 m（树干中心 x=2 m），速度从 1.5 m/s 降到约 0.00923 m/s。旁路无接触，3.002 s 时 x≈4.503 m，速度仍为 1.5 m/s。两组均满足各自断言。
 

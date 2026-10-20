@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Unified entry point for Mspace simulation tools."""
 import argparse
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -26,8 +27,6 @@ COMMANDS = {
     "report-route": MODULE/"scripts/summarize_route.py",
     "report-map": MODULE/"scripts/summarize_map_geometry.py",
     "report-renderer": MODULE/"scripts/summarize_bvh.py",
-    "report-phase1": MODULE/"scripts/summarize_results.py",
-    "report-phase2": MODULE/"scripts/summarize_closed_loop.py",
 }
 
 def main():
@@ -43,7 +42,7 @@ def main():
         codes=[subprocess.call([sys.executable,str(COMMANDS["test"])]+argv[1:]),
                subprocess.call([sys.executable,str(COMMANDS["px4"]),"test"])]
         raise SystemExit(int(any(codes)))
-    raise SystemExit(subprocess.call([sys.executable,str(COMMANDS[args.command])]+argv[1:]))
+    os.execv(sys.executable,[sys.executable,str(COMMANDS[args.command])]+argv[1:])
 
 if __name__=="__main__":
     main()

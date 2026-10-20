@@ -12,8 +12,12 @@ class ForestGeometry(unittest.TestCase):
         theta,z=np.meshgrid(np.linspace(0,2*np.pi,48,endpoint=False),np.arange(0,3,.15))
         return np.column_stack([x+r*np.cos(theta.ravel()),y+r*np.sin(theta.ravel()),z.ravel()])
 
+    def ground(self):
+        x,y=np.meshgrid(np.arange(-2,5,.14),np.arange(-2,2,.14))
+        return np.column_stack([x.ravel(),y.ravel(),np.zeros(x.size)])
+
     def test_separated_trunks_recover_supported_geometry(self):
-        p=np.vstack([self.cylinder(0,0,.2),self.cylinder(2,0,.15)])
+        p=np.vstack([self.cylinder(0,0,.2),self.cylinder(2,0,.15),self.ground()])
         g=extract_geometry(p)
         trunks=sorted([c for c in g["colliders"] if c["kind"]=="trunk"],key=lambda c:c["a"][0])
         self.assertEqual(len(trunks),2)
@@ -27,12 +31,12 @@ class ForestGeometry(unittest.TestCase):
         g=extract_geometry(np.column_stack([x.ravel(),y.ravel(),np.zeros(x.size)]))
         self.assertEqual(len(g["colliders"]),0)
 
-    def test_short_vertical_tube_is_marked_as_candidate_stem(self):
+    def test_short_vertical_tube_is_not_promoted_to_tree(self):
         theta,z=np.meshgrid(np.linspace(0,2*np.pi,32,endpoint=False),np.linspace(.05,.9,30))
         p=np.column_stack([1.3+.06*np.cos(theta.ravel()),.3+.06*np.sin(theta.ravel()),z.ravel()])
-        g=extract_geometry(p)
+        g=extract_geometry(np.vstack([p,self.ground()]))
         self.assertEqual(g["counts"]["trunk"],0)
-        self.assertGreater(g["counts"]["stem"],0)
+        self.assertEqual(g["counts"]["stem"],0)
 
     def test_world_translation_and_branch_axis_match_local_geometry(self):
         g={"colliders":[{"kind":"branch","a":[1,2,3],"b":[2,3,4],"radius":.1}]}
@@ -41,9 +45,13 @@ class ForestGeometry(unittest.TestCase):
         np.testing.assert_allclose(pose[:3],[1.5,2.5,3.5])
         direction=Rotation.from_euler("xyz",pose[3:]).apply([0,0,1])
         np.testing.assert_allclose(direction,np.ones(3)/np.sqrt(3),atol=1e-10)
-        self.assertIsNotNone(m.find("link/collision"));self.assertIsNotNone(m.find("link/visual"))
+        self.assertIsNotNone(m.find("link/collision"))
+        self.assertEqual(m.findall(".//visual"),[])
+        self.assertEqual(m.findtext("link/collision/geometry/cylinder/radius"),"0.1")
+        self.assertAlmostEqual(float(m.findtext("link/collision/geometry/cylinder/length")),np.sqrt(3))
+        self.assertEqual(m.findtext("link/collision/surface/contact/ode/kp"),"1000000.0")
 
     def test_invalid_geometry_and_budget_fail_explicitly(self):
         with self.assertRaises(ValueError):extract_geometry([[np.nan,0,0]])
-        with self.assertRaises(ValueError):extract_geometry(np.vstack([self.cylinder(0,0,.2),self.cylinder(2,0,.2)]),{"max_colliders":1})
+        with self.assertRaises(ValueError):extract_geometry(np.vstack([self.cylinder(0,0,.2),self.cylinder(2,0,.2),self.ground()]),{"max_colliders":1})
         with self.assertRaises(ValueError):geometry_model({"colliders":[{"kind":"trunk","a":[0,0,0],"b":[0,0,0],"radius":.2}]})

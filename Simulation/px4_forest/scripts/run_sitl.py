@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Isolated PX4 SITL -> Iris dynamics -> forest lidar/IMU -> LIO/EGO -> MAVROS."""
-import argparse,json,os,socket,subprocess,sys,time,threading,traceback,shutil
+import argparse,json,os,socket,subprocess,sys,time,threading,traceback,shutil,signal
+# Noninteractive Bash backgrounds may inherit SIGINT ignored. Rearm before
+# heavy imports, and route SIGTERM through the same finally-based shutdown.
+if __name__=="__main__":
+    signal.signal(signal.SIGINT,signal.default_int_handler)
+    signal.signal(signal.SIGTERM,signal.default_int_handler)
 from pathlib import Path
 import numpy as np
 import yaml
@@ -8,7 +13,7 @@ from scipy.spatial.transform import Rotation,Slerp
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT/"Simulation/forest_lio/scripts"))
 from common import POINT_DTYPE,save_trajectory,trajectory_comparison,write_json,summary
-from run_replay import stop
+from process_lifecycle import stop_owned,process_identity
 from renderer import read_pcd
 from bvh_renderer import BVHRenderer
 from generate_mid360_bag import templates_from_bag
@@ -95,7 +100,13 @@ def main():
         local_map=to_local(read_pcd(scene["map"]),map_origin,world_R)
         renderer=BVHRenderer(local_map,threads=4,surface_model=a.surface_model)
         if not a.no_tree_collision:
-            geometry=json.loads(a.forest_geometry.read_text()) if a.forest_geometry else extract_geometry(local_map)
+            if a.forest_geometry:
+                geometry=json.loads(a.forest_geometry.read_text())
+                print("Using cached forest geometry: "+str(a.forest_geometry),flush=True)
+            else:
+                print("Extracting forest trunks before physics startup; reuse --forest-geometry to skip this step.",flush=True)
+                geometry=extract_geometry(local_map)
+            print("Forest geometry: "+json.dumps(geometry["counts"]),flush=True)
             import hashlib
             digest=hashlib.sha256(np.ascontiguousarray(local_map,dtype="<f8").tobytes()).hexdigest()
             if geometry.get("local_map_sha256")!=digest or geometry.get("frame")!="world":
@@ -146,6 +157,8 @@ def main():
             p=subprocess.Popen([str(x) for x in args],cwd=cwd,env=env,stdout=h,stderr=subprocess.STDOUT,start_new_session=True)
             procs.append(p)
             process_logs[p.pid]=name
+            write_json(out/"processes.json",{"controller":process_identity(os.getpid()),"output":str(out),
+                       "roots":[dict(process_identity(q.pid) or {"pid":q.pid},log=process_logs[q.pid]) for q in procs]})
             if critical:required.append(p)
             return p
         def check_required(phase):
@@ -430,12 +443,23 @@ def main():
     except Exception as exc:
         errors.append(type(exc).__name__+": "+str(exc));traceback.print_exc()
     finally:
+        # One interrupt starts shutdown; repeats must not abort its finally block.
+        for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,signal.SIG_IGN)
+        print("Stopping this run's processes; waiting for cleanup before saving the report.",flush=True)
         if a.stage=="forest" and grid_params is None and "rospy" in locals():
             try:grid_params=rospy.get_param("/uav_1_ego_planner_node/grid_map")
             except Exception:pass
         flight_end = flight_end if flight_end is not None else truth[-1][0] if truth else None
-        # Only processes created by this runner; Gazebo continues clock while navigation exits.
-        for p in reversed(procs):stop(p,timeout=8)
+        # Include ROS descendants that created their own sessions. Keep clock
+        # and master until navigation has exited, then shut down the rest.
+        keep=[q.pid for q in procs if process_logs[q.pid] in ("gazebo.log","roscore.log")]
+        cleanup=stop_owned(out,keep_alive=keep)
+        for q in procs:
+            if q.poll() is not None:q.wait()
+        if cleanup["remaining"]:
+            success=False
+            errors.append("Process cleanup incomplete; inspect cleanup.json")
+        print("Process cleanup: "+cleanup["status"],flush=True)
         if "rospy" in locals():rospy.signal_shutdown("SITL complete")
         for h in handles:h.close()
         save_trajectory(out/"plant_world.tum",truth)
@@ -478,6 +502,7 @@ def main():
         np.savetxt(out/"commands.csv",np.asarray(commands).reshape(-1,4),delimiter=",",header="stamp,x,y,z")
         write_json(out/"graph.json",graph)
         write_json(out/"result.json",{"status":"ok" if success and not errors else "failed","errors":errors,"stage":a.stage,
+          "cleanup":cleanup,
           "collision":collision,
           "tree_contact":tree_contact,"forest_geometry_counts":geometry["counts"] if geometry else {},
           "visualization":{"mode":a.gui,"failed_windows":ui_errors},"flight_end_sim_s":flight_end,"goals":goals,"accepted_goals":accepted_goals,"module_alignment":module_info,"native_trigger_sent":trigger_sent,"arrivals":arrivals,"armed_at_sim_s":armed_at,"state_history":state_history,"gps_enabled":a.stage=="hover",
