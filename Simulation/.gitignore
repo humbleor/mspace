@@ -1,0 +1,2 @@
+# Ignore test directories at any depth within Simulation.
+tests/

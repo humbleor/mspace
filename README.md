@@ -1,6 +1,5 @@
 # Mspace
 
-[![zread](https://img.shields.io/badge/Ask_Zread-_.svg?style=flat&color=00b0aa&labelColor=000000&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB3aWR0aD0iMTYiIGhlaWdodD0iMTYiIHZpZXdCb3g9IjAgMCAxNiAxNiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTQuOTYxNTYgMS42MDAxSDIuMjQxNTZDMS44ODgxIDEuNjAwMSAxLjYwMTU2IDEuODg2NjQgMS42MDE1NiAyLjI0MDFWNC45NjAxQzEuNjAxNTYgNS4zMTM1NiAxLjg4ODEgNS42MDAxIDIuMjQxNTYgNS42MDAxSDQuOTYxNTZDNS4zMTUwMiA1LjYwMDEgNS42MDE1NiA1LjMxMzU2IDUuNjAxNTYgNC45NjAxVjIuMjQwMUM1LjYwMTU2IDEuODg2NjQgNS4zMTUwMiAxLjYwMDEgNC45NjE1NiAxLjYwMDFaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00Ljk2MTU2IDEwLjM5OTlIMi4yNDE1NkMxLjg4ODEgMTAuMzk5OSAxLjYwMTU2IDEwLjY4NjQgMS42MDE1NiAxMS4wMzk5VjEzLjc1OTlDMS42MDE1NiAxNC4xMTM0IDEuODg4MSAxNC4zOTk5IDIuMjQxNTYgMTQuMzk5OUg0Ljk2MTU2QzUuMzE1MDIgMTQuMzk5OSA1LjYwMTU2IDE0LjExMzQgNS42MDE1NiAxMy43NTk5VjExLjAzOTlDNS42MDE1NiAxMC42ODY0IDUuMzE1MDIgMTAuMzk5OSA0Ljk2MTU2IDEwLjM5OTlaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik0xMy43NTg0IDEuNjAwMUgxMS4wMzg0QzEwLjY4NSAxLjYwMDEgMTAuMzk4NCAxLjg4NjY0IDEwLjM5ODQgMi4yNDAxVjQuOTYwMUMxMC4zOTg0IDUuMzEzNTYgMTAuNjg1IDUuNjAwMSAxMS4wMzg0IDUuNjAwMUgxMy43NTg0QzE0LjExMTkgNS42MDAxIDE0LjM5ODQgNS4zMTM1NiAxNC4zOTg0IDQuOTYwMVYyLjI0MDFDMTQuMzk4NCAxLjg4NjY0IDE0LjExMTkgMS42MDAxIDEzLjc1ODQgMS42MDAxWiIgZmlsbD0iI2ZmZiIvPgo8cGF0aCBkPSJNNCAxMkwxMiA0TDQgMTJaIiBmaWxsPSIjZmZmIi8%2BCjxwYXRoIGQ9Ik00IDEyTDEyIDQiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgo8L3N2Zz4K&logoColor=ffffff)](https://zread.ai/humbleor/mspace)
 
 **Mspace 是面向森林林冠下 GNSS 拒止环境的无人机自主导航项目，支持单机与多机协同。** 项目基于 ROS Noetic，将 Fast-LIO2 激光雷达惯性定位与建图、EGO-Planner 路径规划与轨迹优化，以及 MAVROS/PX4 控制接口集成到同一 catkin 工作区。
 
@@ -76,40 +75,11 @@ mavros → msgs → fast_lio2 → ego_planner_swarm → swarm_control → realse
 catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 ```
 
-## 4. 森林场景仿真
+## 4. EGO-Swarm 规划仿真
 
-在新终端中加载环境：
+单机 / 多机森林场景规划与雷达机间检测仿真的环境加载、地图准备和启动命令，见 [EGO-Swarm 规划仿真说明](Modules/ego_planner_swarm/README_simulation.md)。
 
-```bash
-source /opt/ros/noetic/setup.bash
-source ~/workspace/ws_livox/devel/setup.bash
-source ~/workspace/mspace/devel/setup.bash
-```
-
-### 地图准备
-
-部分入口依赖仓库外部的森林 PCD 地图。以 `Modules/ego_planner_swarm/plan_manage/launch_new/1uav_mid360_sim.launch` 为例，其 `map_name` 当前指向：
-
-```text
-$(env HOME)/bagfiles/resource/plot2/Largeforest-2_38_32.pcd
-```
-
-运行前准备地图，或修改相应 launch 文件中的 `map_name`，并核对地图偏移、地图范围、初始位置及航点范围。不同入口的配置可能不同。
-
-### 启动入口
-
-按需要选择一个入口：
-
-```bash
-roslaunch ego_planner 1uav_mid360_sim.launch              # 单机 Livox Mid-360
-roslaunch ego_planner 1uav_os128_sim.launch               # 单机 Ouster OS2-128
-roslaunch ego_planner 2uav_mid360_sim.launch              # 双机 Mid-360
-roslaunch ego_planner 4uav_mid360_sim.launch              # 四机 Mid-360
-roslaunch ego_planner 10uav_mid360_sim.launch             # 十机 Mid-360
-roslaunch drone_detect_lidar 2uav_lidar_detect_sim.launch # 双机雷达检测仿真
-```
-
-Mid-360/Ouster 规划入口位于 `plan_manage/launch_new/`，原有配置位于 `plan_manage/launch/`。仿真模型由入口及 include 文件决定：`uav_simulator/fake_drone/` 对应轻量运动学包 `poscmd_2_odom`，另有 `so3_quadrotor_simulator` 动力学模型。
+包含 Fast-LIO2 的森林传感器闭环与 PX4/Gazebo 物理闭环见第 8 节。
 
 ## 5. 实机部署
 
@@ -166,30 +136,24 @@ mkdir -p ~/data
 
 运行前通过 `rostopic list` 核对实际话题，按需要调整脚本中的记录列表。bag 文件写入 `~/data`。
 
-## 7. 开发与排查
 
-- **找不到 Livox 依赖：** 确认外部驱动已构建，并先加载 `ws_livox/devel/setup.bash`。
-- **找不到 ROS 包：** 确认对应模块构建成功，加载项目 `devel/setup.bash`，并使用正确的包名。
-- **仿真地图无法加载：** 检查对应入口的 PCD 路径、文件及地图配置。
-- **多机通信异常：** 检查 ROS Master、各机可达地址、消息桥接配置、编号与话题。
-- **共享消息变更：** 先重建 `Modules/common/msgs/`，再重建相关模块，核对发布端、订阅端和桥接。
+## 7. 森林传感器与导航闭环仿真
 
-当前默认构建启用 `Modules/ego_planner_swarm/`；旧 `Modules/ego_planner` 构建项被注释。`drone_detect` 存在 `CATKIN_IGNORE`，当前参与构建的是 `drone_detect_lidar`。
+仿真工具统一位于 [Simulation](Simulation/README.md)，通过 `python3 Simulation/run.py` 提供以下流程：
 
-项目主要采用模块编译及 ROS 仿真/实机链路验证，没有统一的项目级自动化测试流程。编译通过仅说明构建成功，导航效果需结合森林场景中的定位、建图、避障、轨迹执行和多机运行进一步验证。
+- **离线数据准备与 LIO 基准：** 使用实测 Mid-360 bag 进行原始数据审计、隔离回放、森林 PCD 地图与场景生成，以及已知模拟轨迹下的 LIO 验证。具体命令与限制见 [forest_lio 使用说明](Simulation/forest_lio/README.md)。
+- **轻量在线闭环：** PCD → Mid-360/IMU → Fast-LIO2 → EGO → 简化运动反馈，用于检查传感器、定位与规划的在线联通。运行步骤与模型限制见 [forest_lio 使用说明](Simulation/forest_lio/README.md)。
+- **PX4 软件飞控在环（SITL）：** 复用森林 PCD/LIO 模块，连接 MAVROS、PX4 与 Gazebo Iris 六自由度动力学。环境准备、构建和运行步骤见 [PX4 森林仿真说明](Simulation/px4_forest/README.md)，验收方法与适用边界见 [验证说明](Simulation/px4_forest/docs/validation.md)。
 
-## 8. 森林雷达 / LIO 离线基准
+完成依赖安装、项目与 PX4 构建，并准备好森林地图、扫描模板和场景文件后，在项目根目录执行：
 
-使用实测 Mid-360 bag 建立原始数据审计、隔离回放、点云场景传感器生成和已知轨迹验证。
-运行入口与限制见 [使用说明](Simulation/forest_lio/README.md)，实际验证结果见
-[第一阶段实验报告](artifacts/forest_lio/historical_reports/forest_lio_phase1.md)。该离线基准用于建立参考数据，不启动飞控控制节点；在线闭环入口见下文。
+```bash
+bash Simulation/start.sh short # 短程检查
+bash Simulation/start.sh       # 完整 15 点任务
+```
 
-第二阶段已接入在线 PCD → Mid-360/IMU → Fast-LIO2 → EGO → 简化运动反馈闭环；运行步骤与限制见 [工具说明](Simulation/forest_lio/README.md)，实跑结果见 [第二阶段报告](artifacts/forest_lio/historical_reports/forest_lio_phase2.md)。
+首次使用或更换数据时，先按 [统一仿真说明](Simulation/README.md) 完成数据准备；默认启动所需的地图和场景文件不随仓库提供。
 
-森林传感器现支持 BVH 候选面查询与逐点位姿；验证及性能边界见 [渲染改进报告](Simulation/forest_lio/docs/forest_lio_renderer.md)。
+森林传感器的 BVH 候选面查询、逐点位姿及性能边界见 [渲染说明](Simulation/forest_lio/docs/forest_lio_renderer.md)，地图与观测覆盖限制见 [地图与几何说明](Simulation/forest_lio/docs/forest_lio_map_geometry.md)。
 
-PX4 软件飞控在环入口已组织在 [Simulation/px4_forest](Simulation/px4_forest/README.md)，复用森林 PCD/LIO 模块并连接 Gazebo Iris 六自由度动力学。原生悬停与森林无 GPS 阶段分别验收；实际运行成功与否以每次 result.json 为准。
-
-一键启动森林仿真：`bash Simulation/start.sh`（完整 15 点任务），短程检查：`bash Simulation/start.sh short`。
-
-仿真代码已统一到 [Simulation](Simulation/README.md)：`python3 Simulation/run.py` 提供数据准备、轻量闭环和 `px4` 物理闭环入口，完整流程与启动命令见该目录说明。
+`artifacts/forest_lio/` 和 `artifacts/px4_forest/` 用于保存本地生成的数据、日志与实验报告，已由 Git 忽略，克隆仓库后不会包含这些文件。运行后从本次输出目录查看 `result.json`、`report.md` 等结果；各阶段是否通过以对应验收结果为准，启动成功不等于导航验收通过。
