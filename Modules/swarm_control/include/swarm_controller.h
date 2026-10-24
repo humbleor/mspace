@@ -4,6 +4,7 @@
 #include <ros/ros.h>
 #include <bitset>
 #include <algorithm>
+#include <map>
 
 #include <mavros_msgs/CommandBool.h>
 #include <mavros_msgs/SetMode.h>
@@ -30,6 +31,19 @@ using namespace std;
 #define NODE_NAME "swarm_controller"            // 节点名字
 #define NUM_POINT 2                             // 打印小数点
 #define MAX_UAV_NUM 50
+
+// Coordinate readiness is opt-in for legacy launch compatibility.
+bool require_frame_ready = false;
+std::map<int, std::pair<bool, ros::WallTime>> frame_readiness;
+std::vector<ros::Subscriber> frame_ready_subscribers;
+bool framesReady() {
+    if (!require_frame_ready) return true;
+    if (frame_readiness.empty()) return false;
+    for (const auto& entry : frame_readiness) {
+        if (!entry.second.first || (ros::WallTime::now()-entry.second.second).toSec() > 0.5) return false;
+    }
+    return true;
+}
 
 // 变量
 int swarm_num;                                  // 集群数量
@@ -458,6 +472,7 @@ int check_failsafe()
     }
 }
 
+void publish_local_target(mavros_msgs::PositionTarget& target);
 void idle()
 {
     mavros_msgs::PositionTarget pos_setpoint;
@@ -466,7 +481,15 @@ void idle()
     //飞控如何执行该指令请见FlightTaskOffboard.cpp
     pos_setpoint.type_mask = 0x4000;
     pos_setpoint.coordinate_frame = 1;
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
+}
+
+// Only this boundary labels outgoing coordinates; the adapter performs the inverse transform.
+void publish_local_target(mavros_msgs::PositionTarget& target)
+{
+    target.header.stamp = ros::Time::now();
+    if (require_frame_ready) target.header.frame_id = "world";
+    setpoint_raw_local_pub.publish(target);
 }
 
 //发送位置期望值至飞控（输入：期望xyz,期望yaw）
@@ -486,7 +509,7 @@ void send_pos_setpoint(const Eigen::Vector3d& pos_sp, float yaw_sp)
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 }
 
 //发送速度期望值至飞控（输入：期望vxvyvz,期望yaw）
@@ -504,7 +527,7 @@ void send_vel_setpoint(const Eigen::Vector3d& vel_sp, float yaw_sp)
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 }
 
 void send_vel_xy_pos_z_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vector3d& vel_sp, float yaw_sp)
@@ -523,7 +546,7 @@ void send_vel_xy_pos_z_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vect
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
     
     // 检查飞控是否收到控制量
     // cout <<">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>command_to_mavros<<<<<<<<<<<<<<<<<<<<<<<<<<<" <<endl;
@@ -551,7 +574,7 @@ void send_pos_vel_xy_pos_z_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 }
 
 void send_pos_vel_acc_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vector3d& vel_sp, const Eigen::Vector3d& accel_sp, float yaw_sp)
@@ -576,7 +599,7 @@ void send_pos_vel_acc_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vecto
     pos_setpoint.acceleration_or_force.z = accel_sp[2];
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 }
 void send_pos_vel_xyz_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vector3d& vel_sp, float yaw_sp)
 {
@@ -598,7 +621,7 @@ void send_pos_vel_xyz_setpoint(const Eigen::Vector3d& pos_sp, const Eigen::Vecto
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 }
 
 //发送加速度期望值至飞控（输入：期望axayaz,期望yaw）
@@ -616,7 +639,7 @@ void send_acc_xyz_setpoint(const Eigen::Vector3d& accel_sp, float yaw_sp)
 
     pos_setpoint.yaw = yaw_sp;
 
-    setpoint_raw_local_pub.publish(pos_setpoint);
+    publish_local_target(pos_setpoint);
 
     // 检查飞控是否收到控制量
     // cout <<">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>command_to_mavros<<<<<<<<<<<<<<<<<<<<<<<<<<<" <<endl;

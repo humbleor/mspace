@@ -1,0 +1,16 @@
+# Radians/metres. First version: level, stationary, common takeoff-height origin.
+stable_duration: 3.0
+source_timeout: 0.5
+# Wall-clock watchdog for a silent publisher; larger than source_timeout so heavy
+# CPU load cannot latch INVALID while fresh data is still arriving.
+receive_timeout: 1.5
+max_source_skew: 0.15
+stationary_speed: 0.05
+stationary_position_tolerance: 0.03
+stationary_yaw_tolerance: 0.01745329252
+max_initial_tilt: 0.0872664626
+# T_I_B: body origin expressed in LIO IMU coordinates; rotation maps body vectors to IMU.
+# Identity assumes aligned axes/coincident reference points: measure these on the aircraft.
+body_in_imu:
+  translation: [0.0, 0.0, 0.0]
+  rpy: [0.0, 0.0, 0.0]

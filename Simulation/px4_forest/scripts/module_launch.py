@@ -48,21 +48,37 @@ def task_map_layout(goals,grid,planner,advanced):
             "estimate_scope":"GridMap six dense buffers only; excludes planner, LIO, renderer and GUI overhead",
             "z_policy":"Preserve template height, expand only if task goals need more headroom"}
 
-def prepare_modules(root,out,goals,grid=None):
+def prepare_modules(root,out,goals,grid=None,world_frame=False):
+    """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root,out=Path(root),Path(out)
     wrapper=ET.Element("launch")
     ET.SubElement(wrapper,"param",name="use_sim_time",value="true")
     ET.SubElement(wrapper,"param",name="output_root",value=str(out))
     cfg=yaml.safe_load((root/"Modules/fast_lio2/config/mid360.yaml").read_text())
-    for original,simulation in [(cfg["common"]["lid_topic"],"/sim/mid360/lidar"),(cfg["common"]["imu_topic"],"/sim/mid360/imu")]:
-        ET.SubElement(wrapper,"remap",attrib={"from":original,"to":simulation})
+    sensor_topic={"lidar":"/sim/mid360/lidar","imu":"/sim/mid360/imu"}
+    if not world_frame:
+        for original,simulation in [(cfg["common"]["lid_topic"],sensor_topic["lidar"]),(cfg["common"]["imu_topic"],sensor_topic["imu"])]:
+            ET.SubElement(wrapper,"remap",attrib={"from":original,"to":simulation})
     lio=ET.SubElement(wrapper,"include",file=str(root/"Modules/fast_lio2/launch/mapping_mid360.launch"))
     ET.SubElement(lio,"arg",name="uav_id",value="1")
     ET.SubElement(lio,"arg",name="rviz",value="false")
+    if world_frame:
+        # World mode derives sensor topics from the namespace, so bind them directly.
+        ET.SubElement(lio,"arg",name="enable_world_frame",value="true")
+        ET.SubElement(lio,"arg",name="lidar_topic",value=sensor_topic["lidar"])
+        ET.SubElement(lio,"arg",name="imu_topic",value=sensor_topic["imu"])
     control=ET.SubElement(wrapper,"include",file=str(root/"Modules/swarm_control/launch/ego_swarm_control.launch"))
-    for k,v in {"uav_id":"1","swarm_num":"1","input_source":"4"}.items():
+    control_args={"uav_id":"1","swarm_num":"1","input_source":"4"}
+    if world_frame:
+        control_args.update({"enable_world_frame":"true","uav_init_x":"0.0","uav_init_y":"0.0",
+                            "uav_init_z":"0.0","uav_init_yaw":"0.0"})
+    for k,v in control_args.items():
         ET.SubElement(control,"arg",name=k,value=v)
     planner=ET.parse(root/"Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch")
+    if world_frame:
+        for e in planner.getroot().findall("arg"):
+            if e.get("name")=="enable_world_frame":
+                e.set("value","true");e.attrib.pop("default",None)
     include=next(e for e in planner.getroot().findall("include") if "advanced_param_px4" in e.get("file",""))
     advanced=ET.parse(root/"Modules/ego_planner_swarm/plan_manage/launch_new/advanced_param_px4.xml").getroot()
     layout=task_map_layout(goals,grid,planner.getroot(),advanced)
@@ -97,8 +113,11 @@ def prepare_modules(root,out,goals,grid=None):
             "planner_template":"Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch",
             "control_template":"Modules/swarm_control/launch/ego_swarm_control.launch",
             "flight_type":3 if grid else 2,"control_takeoff_height":1.2,
-            "planner_odom":"/uav1/mavros/local_position/odom",
-            "planner_cloud":"/uav1/drone_cloud_registered","traj_time_forward":1.0,
+            "planner_odom":"/uav1/world/odom" if world_frame else "/uav1/mavros/local_position/odom",
+            "planner_cloud":"/uav1/world/cloud" if world_frame else "/uav1/drone_cloud_registered","traj_time_forward":1.0,
+            "frame_mode":"world" if world_frame else "legacy",
+            "frame_owner":{"world/odom":"/swarm_frame_adapter_uav_1","world/cloud":"/swarm_frame_adapter_uav_1",
+                           "mavros/setpoint_raw/local":"/swarm_frame_adapter_uav_1"} if world_frame else {},
             "overrides":dict(overrides,realworld_experiment=True,strict_waypoint_tracking=True),"algorithms_modified":True,
             "simulation_map_layout":layout,
             "module_changes":["Optional strict native mission scheduling with odometry arrivals; optimizer unchanged"]}

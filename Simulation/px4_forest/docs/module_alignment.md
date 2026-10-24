@@ -36,6 +36,17 @@ EGO B 样条 → traj_server → ego_traj_to_cmd → SwarmCommand → swarm_cont
 
 运行目录保存 module_alignment.json、module_params.json、graph.json。图审计要求 setpoint 发布者为 swarm_controller_uav_1、vision_pose 为 swarm_estimator_uav_1、轨迹指令为 uav1_traj_server。物理真值不得被 LIO、EGO、状态估计器、控制器或 MAVROS 订阅。
 
+## 公共坐标模式（--world-frame）
+
+该开关把三个入口改成 world 模式（fast_lio 自带 `enable_world_frame`、control 与 EGO 同步开启），属可选的真实链路验证路径，默认不启用：
+
+- 绑定方式：LIO 模板直接接收 `lidar_topic`/`imu_topic`（world 模式下模板从命名空间推导话题，不能用 `/livox/...` 的 remap）；control 额外传 `enable_world_frame` 与 `uav_init_x/y/z/yaw=0`；planner 模板的 `enable_world_frame` 参数改为 true，由模板自身把里程计/点云切到 `world/odom`、`world/cloud` 并打开 `fsm/odom_twist_in_body`。
+- MAVROS：生成的 mavros_config.yaml 把 `local_position.frame_id` 与 TF frame 改为 `uav1/fcu_local`、child 为 `uav1/base_link`，`imu.frame_id` 改为 `uav1/base_link`。
+- 发布者审计切换为适配节点：`/uav1/mavros/setpoint_raw/local`、`/uav1/world/odom`、`/uav1/world/cloud`、`/uav1/prometheus/drone_state` 的唯一发布者为 `/swarm_frame_adapter_uav_1`；vision_pose 仍为 estimator，轨迹仍为 traj_server。
+- 起飞门控：地面站只在 `/uav1/frame_ready` 为 true 后发送 Takeoff；控制器自身也在 `require_frame_ready` 下拦截未就绪的指令，因此依赖"送出即生效"的流程必须改成就绪后重发。
+
+额外证据 `world_frame_evidence.json` 由 `scripts/world_frame_evidence.py` 生成，只使用公开话题数据：固定变换刚性（world/odom 与 fcu odom 同一批次反算 yaw 偏移与平移，偏差应在浮点精度级）、初始锚点、world↔FCU 指令往返（按 header.stamp 配对，`0x4000` 预解锁心跳按设计原样通过并单独计数）、world 与 LIO 点云对同一物理地图的相对对齐。任一项不过即整体 failed。
+
 结果保留 goals（原请求）和 accepted_goals（观察到的原 EGO 重定位标记）。Simulation 不选择邻近点；若模块自身重定位，报告应给出偏移。module_alignment.json 明确记录 algorithms_modified=true 和本次原模块任务调度变更，禁止把修复后运行称作完全未修改的基线。原始目标到达与模块接受目标的到达不能混称。
 
 完整 32×16 网格：

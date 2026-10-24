@@ -11,6 +11,7 @@
   <arg name="box_max_z"/>
 
   <arg name="odometry_topic"/>
+  <arg name="odom_twist_in_body" default="false"/>
   <arg name="camera_pose_topic"/>
   <arg name="depth_topic"/>
   <arg name="cloud_topic"/>
@@ -58,6 +59,7 @@
     <remap from="~grid_map/pose"   to = "/uav$(arg uav_id)/$(arg camera_pose_topic)"/> 
     <remap from="~grid_map/depth" to = "/uav$(arg uav_id)/$(arg depth_topic)"/>
 
+    <param name="fsm/odom_twist_in_body" value="$(arg odom_twist_in_body)"/>
     <!-- planning fsm -->
     <param name="fsm/flight_type" value="$(arg flight_type)" type="int"/>  
     <param name="fsm/thresh_replan_time" value="1.0" type="double"/>

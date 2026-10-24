@@ -58,6 +58,19 @@ python3 Simulation/run.py px4 run --stage forest \
 python3 Simulation/run.py px4 report artifacts/px4_forest/my_forest
 ```
 
+### 公共坐标（world 模式）
+
+加 `--world-frame` 把三个 Modules 入口绑定到 `swarm_frame_adapter`：Fast-LIO2 输出 `uav1/lio_init`，MAVROS 本地 frame 改为 `uav1/fcu_local`，控制器的 setpoint 经适配节点逆变换后下发。仿真地面站在 `/uav1/frame_ready` 为 true 前不发送起飞命令：
+
+```bash
+python3 Simulation/run.py px4 run --stage forest \
+  --scene artifacts/forest_lio/route_125_155.json \
+  --output artifacts/px4_forest/world_single --speed .5 --duration 90 --headless \
+  --goals 1 --world-frame
+```
+
+运行目录额外生成 `world_frame_evidence.json`，校验四项不依赖适配节点自述证据的性质：固定变换刚性、初始锚点、world↔FCU 指令往返、world 点云对物理地图的对齐不劣于未变换点云。任一项不过（`passed=false`）则整次运行为 failed。开关只影响三个 Modules 入口和生成的 MAVROS 配置，默认关闭时与原基线完全一致；具体接线和实测结果见 [原模块接入约定](docs/module_alignment.md) 与 [WORLD_FRAME.md](../../Modules/swarm_control/WORLD_FRAME.md)。
+
 ### 按 generateWps 生成完整网格路线
 
 使用 config/grid_route.json 配置 x/y/z 各自的 min、max、step。当前配置对应 x=0..32、y=0..16、z=2，step_X=8、step_Y=8、step_Z=2，waypointDistriFlag=0、grid_direction=0。生成 15 个目标，另加独立起飞点：
@@ -103,7 +116,7 @@ python3 Simulation/run.py px4 run --stage forest \
 - 原始 PCD 影响雷达测量，拟合圆柱参与刚性接触；低支撑/未识别几何和部分枝叶仍没有实体碰撞，木材响应未标定。
 - Iris 动力学和 IMU 尚未用你的机体、推力曲线、真实振动标定。
 - 地图未观测区域不能作为已知自由空间，覆盖证据仍只用于评估。
-- 当前入口为单机；不宣称多机闭环或实体飞控 HIL 已验证。
+- 当前入口为单机；不宣称多机闭环或实体飞控 HIL 已验证。`--world-frame` 只能证明单机 world 链路的固定变换、指令往返与点云一致性，不能证明两机坐标统一。
 - `result.json` 状态为 ok 才代表该次验收通过；有日志不代表成功。
 
 官方参考：[Gazebo SITL](https://docs.px4.io/v1.13/en/simulation/gazebo)、[外部位姿融合](https://docs.px4.io/v1.13/en/ros/external_position_estimation)、[MAVROS OFFBOARD](https://docs.px4.io/v1.13/en/ros/mavros_offboard_python)。

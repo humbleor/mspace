@@ -52,6 +52,7 @@ def main():
     ap.add_argument("--max-truth-gap",type=float,default=.05,help="Maximum physical truth interval for collision acceptance")
     ap.add_argument("--forest-geometry",type=Path,help="Pre-extracted geometry.json matching this local PCD hash")
     ap.add_argument("--no-tree-collision",action="store_true",help="Explicit legacy comparison: disable physical tree collision")
+    ap.add_argument("--world-frame",action="store_true",help="Bind Modules to the swarm world adapter: uav1/lio_init and uav1/fcu_local map into a shared world")
     ap.add_argument("--keep-contact-open",action="store_true",help="Pause on tree contact and preserve active GUI windows")
     ap.add_argument("--instance",type=int,default=20)
     ap.add_argument("--waypoints",type=Path,help="generateWps grid JSON: x/y/z min,max,step; absolute local world heights")
@@ -64,6 +65,7 @@ def main():
     except ValueError as exc:ap.error(str(exc))
     if a.collision_model=="proxy" and a.obstacle_radius<.2:ap.error("--obstacle-radius must enclose the 0.2 m sensor surfel support")
     if a.stage=="forest" and not a.scene:ap.error("forest requires --scene")
+    if a.world_frame and a.stage!="forest":ap.error("--world-frame requires the forest stage")
     if a.waypoints and a.stage!="forest":ap.error("--waypoints requires forest stage")
     if a.goals is not None and a.goals<1:ap.error("--goals must be positive")
     if a.waypoints and a.goals:ap.error("Native generateWps executes the full grid; omit --goals")
@@ -121,7 +123,7 @@ def main():
         T=np.asarray(cfg["mapping"]["extrinsic_T"]);E=np.asarray(cfg["mapping"]["extrinsic_R"]).reshape(3,3)
         coverage=CoverageMap.load(scene["coverage"])
     if a.stage=="forest":
-        module_info=prepare_modules(ROOT,out,goals,waypoint_config)
+        module_info=prepare_modules(ROOT,out,goals,waypoint_config,world_frame=a.world_frame)
         write_json(out/"module_alignment.json",module_info)
     ports={key:port(kind) for key,kind in [("ros",socket.SOCK_STREAM),("gazebo",socket.SOCK_STREAM),("sim",socket.SOCK_STREAM),("px4",socket.SOCK_DGRAM),("mavros",socket.SOCK_DGRAM),("unused",socket.SOCK_DGRAM)]}
     gazebo=prepare_model(px4,out,plugin,ports,a.instance,gps=a.stage=="hover",speed=a.speed)
@@ -144,6 +146,7 @@ def main():
     flight_end=None
     grid_params=None
     process_logs={}
+    world_evidence=None
     tree_enabled=a.stage=="forest" and not a.no_tree_collision
     contact_rows=[];contact_frames=0;contact_times=[];contact_event=threading.Event()
     def assess_collision(rows):
@@ -180,13 +183,13 @@ def main():
             time.sleep(.1)
         import rospy
         from nav_msgs.msg import Odometry
-        from sensor_msgs.msg import Imu
+        from sensor_msgs.msg import Imu,PointCloud2
         from geometry_msgs.msg import PoseStamped
         from quadrotor_msgs.msg import PositionCommand
         from livox_ros_driver2.msg import CustomMsg
         from mavros_msgs.msg import State,PositionTarget
         from mavros_msgs.srv import SetMode,CommandBool,ParamGet
-        from std_msgs.msg import Header
+        from std_msgs.msg import Header,Bool
         from prometheus_msgs.msg import SwarmCommand
         from visualization_msgs.msg import Marker
         from gazebo_msgs.msg import ContactsState
@@ -245,6 +248,37 @@ def main():
         if a.stage=="forest":
             rospy.Subscriber("/uav_1_ego_planner_node/goal_point",Marker,accepted_goal_cb,queue_size=100)
             rospy.Subscriber(mavros_topic+"/vision_pose/pose",PoseStamped,vision_cb,queue_size=1)
+        world_rows=[];world_targets=[];fcu_targets=[];world_clouds=[];lio_clouds=[]
+        ready_state={"value":False,"first_sim":None}
+        def world_cb(m):world_rows.append(values(m))
+        def ready_cb(m):
+            if m.data and ready_state["first_sim"] is None:ready_state["first_sim"]=rospy.Time.now().to_sec()
+            ready_state["value"]=bool(m.data)
+        def target_row(m,store):
+            store.append({"stamp":m.header.stamp.to_sec(),"mask":int(m.type_mask),
+                "position":[m.position.x,m.position.y,m.position.z],
+                "velocity":[m.velocity.x,m.velocity.y,m.velocity.z],
+                "yaw":float(m.yaw),"frame_id":m.header.frame_id})
+        def cloud_row(m):
+            step=m.point_step;count=m.width*m.height
+            raw=np.frombuffer(m.data,dtype=np.uint8).reshape(-1,step)[:count]
+            xyz=np.empty((count,3),dtype=float)
+            for axis,name in enumerate(("x","y","z")):
+                offset=next(f.offset for f in m.fields if f.name==name)
+                xyz[:,axis]=np.ascontiguousarray(raw[:,offset:offset+4]).view("<f4").ravel()
+            return xyz[np.isfinite(xyz).all(axis=1)]
+        def lio_cloud_cb(m):
+            if ready_state["value"] and len(lio_clouds)<2:lio_clouds.append(cloud_row(m))
+        if a.world_frame:
+            rospy.Subscriber("/uav1/world/odom",Odometry,world_cb,queue_size=2000)
+            rospy.Subscriber("/uav1/world/setpoint_raw/local",PositionTarget,
+                lambda m:target_row(m,world_targets),queue_size=1000)
+            rospy.Subscriber(mavros_topic+"/setpoint_raw/local",PositionTarget,
+                lambda m:target_row(m,fcu_targets),queue_size=1000)
+            rospy.Subscriber("/uav1/world/cloud",PointCloud2,
+                lambda m:world_clouds.append(cloud_row(m)) if len(world_clouds)<2 else None,queue_size=2)
+            rospy.Subscriber("/uav1/drone_cloud_registered",PointCloud2,lio_cloud_cb,queue_size=2)
+            rospy.Subscriber("/uav1/frame_ready",Bool,ready_cb,queue_size=10)
         flight=launch([binary,"-i",a.instance,"-d","-s","etc/init.d-posix/rcS"],"px4.log")
         physics=launch(["gzserver","--verbose",out/"forest.world","-s","/opt/ros/noetic/lib/libgazebo_ros_api_plugin.so"],"gazebo.log")
         # MAVROS measures connection loss in wall time; PX4 heartbeats follow
@@ -253,6 +287,11 @@ def main():
         mavros_share=Path(rospkg.RosPack().get_path("mavros"))
         mavros_config=yaml.safe_load((ROOT/"Experiment/mavros/launch/px4_config.yaml").read_text())
         mavros_config["conn"]["timeout"]=max(10.0,3.0/a.speed)
+        if a.world_frame:
+            # Mirror Experiment/mavros/launch/px4_mavros_swarm_basic.launch world-mode frames.
+            mavros_config["local_position"]={"frame_id":"uav1/fcu_local",
+                "tf":{"send":True,"frame_id":"uav1/fcu_local","child_frame_id":"uav1/base_link","send_fcu":False}}
+            mavros_config["imu"]["frame_id"]="uav1/base_link"
         (out/"mavros_config.yaml").write_text(yaml.safe_dump(mavros_config))
         import xml.etree.ElementTree as ET
         mavros_launch=ET.Element("launch")
@@ -342,7 +381,7 @@ def main():
                 if a.stage=="hover":
                     target.position.z=a.takeoff_height
                 setpoint_pub.publish(target);last_setpoint=now
-            ready=now-start_sim>8 and (a.stage=="hover" or len(lio)>25)
+            ready=now-start_sim>8 and (a.stage=="hover" or len(lio)>25) and (not a.world_frame or ready_state["value"])
             if a.stage=="hover" and ready and time.monotonic()-last_service>1:
                 if state.mode!="OFFBOARD":set_mode(custom_mode="OFFBOARD")
                 elif not state.armed:arm(value=True)
@@ -352,7 +391,7 @@ def main():
                 # ground-station mode/arm requests. Its legacy Idle (0x4000)
                 # packet enables zero fields on PX4 1.13 and can falsely clear
                 # landed before the actual takeoff request reaches the FCU.
-                if not takeoff_sent and station_pub.get_num_connections():
+                if not takeoff_sent and station_pub.get_num_connections() and (not a.world_frame or ready_state["value"]):
                     station_command(SwarmCommand.Takeoff);takeoff_sent=True
                     last_service=time.monotonic()
                 elif takeoff_sent and time.monotonic()-last_service>1:
@@ -394,13 +433,32 @@ def main():
             expected={mavros_topic+"/setpoint_raw/local":"/swarm_controller_uav_1",
                       mavros_topic+"/vision_pose/pose":"/swarm_estimator_uav_1",
                       traj_topic:"/uav1_traj_server"}
+            if a.world_frame:
+                # The adapter owns the FCU-side boundary and the public world topics.
+                expected={mavros_topic+"/setpoint_raw/local":"/swarm_frame_adapter_uav_1",
+                          mavros_topic+"/vision_pose/pose":"/swarm_estimator_uav_1",
+                          traj_topic:"/uav1_traj_server",
+                          "/uav1/world/odom":"/swarm_frame_adapter_uav_1",
+                          "/uav1/world/cloud":"/swarm_frame_adapter_uav_1",
+                          "/uav1/prometheus/drone_state":"/swarm_frame_adapter_uav_1"}
             graph["module_publishers_valid"]=all(graph["publishers"].get(t)==[n] for t,n in expected.items())
             if not graph["module_publishers_valid"]:raise RuntimeError("Native module publisher ownership audit failed")
         if graph["protected_truth_subscribers_in_navigation"]:raise RuntimeError("Truth leaked into navigation")
+        if world_evidence is None and a.stage=="forest" and a.world_frame:
+            from world_frame_evidence import assess as assess_world_frame
+            try:
+                world_evidence=assess_world_frame(world_rows,fcu,world_targets,fcu_targets,
+                    world_clouds,lio_clouds,local_map,ready_state["first_sim"])
+            except Exception as exc:
+                world_evidence={"world_frame":True,"passed":False,
+                    "failures":["world-frame evidence unavailable: "+str(exc)]}
+            write_json(out/"world_frame_evidence.json",world_evidence)
         if a.stage=="forest":
-            write_json(out/"module_params.json",{k:rospy.get_param(k) for k in ("/uav_1_ego_planner_node","/swarm_controller_uav_1","/swarm_estimator_uav_1","/ego_traj_to_cmd_uav_1","/mapping","/preprocess","/common") if rospy.has_param(k)})
+            write_json(out/"module_params.json",{k:rospy.get_param(k) for k in ("/uav_1_ego_planner_node","/swarm_controller_uav_1","/swarm_estimator_uav_1","/ego_traj_to_cmd_uav_1","/swarm_frame_adapter_uav_1","/mapping","/preprocess","/common") if rospy.has_param(k)})
         with lock:last_truth=np.asarray(truth[-1][1:4])-initial
-        success=finished is not None and np.linalg.norm(last_truth-accepted_goals[-1])<.3 and state.armed and state.mode=="OFFBOARD"
+        success=finished is not None and np.linalg.norm(last_truth-accepted_goals[-1])<.3 and state.armed and state.mode=="OFFBOARD" and (world_evidence is None or world_evidence["passed"])
+        if world_evidence is not None and not world_evidence["passed"]:
+            errors.extend("World-frame evidence failed: "+f for f in world_evidence["failures"])
         if a.stage=="forest" and (param_checks["EKF2_AID_MASK"]!=24 or param_checks["EKF2_HGT_MODE"]!=3):raise RuntimeError("GNSS-denied EKF parameters not active")
         if not success:errors.append("Mission did not settle within the goal tolerance while armed in OFFBOARD")
         if a.stage=="forest":
@@ -507,6 +565,7 @@ def main():
           "tree_contact":tree_contact,"forest_geometry_counts":geometry["counts"] if geometry else {},
           "visualization":{"mode":a.gui,"failed_windows":ui_errors},"flight_end_sim_s":flight_end,"goals":goals,"accepted_goals":accepted_goals,"module_alignment":module_info,"native_trigger_sent":trigger_sent,"arrivals":arrivals,"armed_at_sim_s":armed_at,"state_history":state_history,"gps_enabled":a.stage=="hover",
           "parameter_checks":param_checks,"initial_gazebo_position":initial,"final_position":local[-1,1:4] if len(local) else None,
+          "world_frame":a.world_frame,"world_frame_evidence":world_evidence,
           "goal_error_m":float(np.linalg.norm(local[-1,1:4]-accepted_goals[-1])) if len(local) else None,
           "goal_min_lio_distance_m":[float(np.min(np.linalg.norm(est[:,1:4]-g,axis=1))) for g in accepted_goals] if len(est) else [],
           "requested_goal_min_lio_distance_m":[float(np.min(np.linalg.norm(est[:,1:4]-g,axis=1))) for g in goals] if len(est) else [],
@@ -517,7 +576,8 @@ def main():
                     "Gazebo Iris dynamics with fitted static trunk/coarse-branch shapes; unmodeled forest remains." if tree_enabled else "Physical forest collision explicitly disabled or not applicable.",
                     "ROS LIO IMU from actual physics specific force in g; PX4 uses standard simulated IMU.",
                     "LIO/world origin based on stable initial body position; truth used only for sensor rendering and evaluation.",
-                    "This isolated single-UAV test does not validate swarm flight or measured sensor realism."]})
+                    "This isolated single-UAV test does not validate swarm flight or measured sensor realism."]
+                    +(["World mode proves a fixed uav1/lio_init->world and uav1/fcu_local->world transform, command inversion and map agreement for one UAV; it does not validate two-aircraft alignment."] if a.world_frame else [])})
         print(out/"result.json",flush=True)
     if not success or errors:raise SystemExit("SITL validation failed")
 if __name__=="__main__":main()

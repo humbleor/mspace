@@ -27,6 +27,8 @@ find_package(catkin REQUIRED COMPONENTS
 
 ## System dependencies are found with CMake's conventions
 find_package(Boost REQUIRED COMPONENTS system)
+find_package(Eigen3 REQUIRED)
+add_compile_options(-std=c++14)
 
 
 
@@ -58,6 +60,7 @@ catkin_package(
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
+  ${EIGEN3_INCLUDE_DIRS}
   ../common/include
   ../ego_planner_swarm/uav_simulator/Utils/uav_utils/include
 )
@@ -69,6 +72,10 @@ include_directories(
 
 
 ##
+add_executable(swarm_frame_adapter src/swarm_frame_adapter.cpp)
+add_dependencies(swarm_frame_adapter ${catkin_EXPORTED_TARGETS})
+target_link_libraries(swarm_frame_adapter ${catkin_LIBRARIES})
+
 add_executable(swarm_estimator src/swarm_estimator.cpp)
 add_dependencies(swarm_estimator prometheus_swarm_control_gencpp)
 target_link_libraries(swarm_estimator ${catkin_LIBRARIES})
@@ -132,6 +139,8 @@ install(DIRECTORY launch/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch
 )
 
+install(TARGETS swarm_frame_adapter RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+
 #############
 ## Testing ##
 #############
@@ -144,3 +153,8 @@ install(DIRECTORY launch/
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+if(CATKIN_ENABLE_TESTING)
+  add_executable(swarm_frame_transform_test test/frame_transform_test.cpp)
+  target_compile_options(swarm_frame_transform_test PRIVATE -UNDEBUG)
+  add_test(NAME swarm_frame_transform COMMAND swarm_frame_transform_test)
+endif()

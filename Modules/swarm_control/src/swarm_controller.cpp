@@ -12,6 +12,21 @@ int main(int argc, char **argv)
 
     // 读取参数，变量初始化
     init(nh);
+    nh.param("require_frame_ready", require_frame_ready, false);
+    if (require_frame_ready) {
+        if (controller_flag != 1 || swarm_num < 1 || swarm_num > MAX_UAV_NUM) {
+            ROS_FATAL("world-frame mode requires PX4 position control and swarm_num in 1..50");
+            return 1;
+        }
+        for (int id = 1; id <= swarm_num; ++id) {
+            frame_readiness[id] = {false, ros::WallTime()};
+            frame_ready_subscribers.push_back(nh.subscribe<std_msgs::Bool>(
+                "/uav" + std::to_string(id) + "/frame_ready", 10,
+                [id](const std_msgs::Bool::ConstPtr& msg) {
+                    frame_readiness[id] = {msg->data, ros::WallTime::now()};
+                }));
+        }
+    }
 
     // 建议控制频率 ： 10 - 50Hz, 控制频率取决于控制形式，若控制方式为速度或加速度应适当提高频率
     ros::Rate rate(controller_hz);
@@ -77,6 +92,14 @@ int main(int argc, char **argv)
 
 void mainloop_cb(const ros::TimerEvent &e)
 {
+    if (!framesReady() && Command_Now.Mode != prometheus_msgs::SwarmCommand::Disarm) {
+        // Drop commands queued before initialization or after readiness loss.
+        Command_Now.Mode = prometheus_msgs::SwarmCommand::Idle;
+        Command_Now.yaw_ref = 0;
+        Command_Last = Command_Now;
+        if (!_DroneState.armed) idle();
+        return;
+    }
     // Check for geo fence: If drone is out of the geo fence, it will land now.
     if(check_failsafe() == 1)
     {
@@ -327,6 +350,7 @@ void mainloop_cb(const ros::TimerEvent &e)
 
 void control_cb(const ros::TimerEvent &e)
 {
+    if (!framesReady()) return;
     if( Command_Now.Mode == prometheus_msgs::SwarmCommand::Idle  ||
          Command_Now.Mode == prometheus_msgs::SwarmCommand::Disarm  )
     {

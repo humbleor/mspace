@@ -1,0 +1,9 @@
+<launch>
+  <!-- Keep each host's existing MID360_config.json; isolate ROS names, not hardware IP configuration. -->
+  <arg name="uav_id" default="1"/>
+  <group ns="uav$(arg uav_id)">
+    <include file="$(find livox_ros_driver2)/launch_ROS1/msg_MID360.launch">
+      <arg name="msg_frame_id" value="uav$(arg uav_id)/livox_frame"/>
+    </include>
+  </group>
+</launch>

@@ -2,6 +2,13 @@
 
 using namespace std;
 
+std::string fastlio_frame = "world";
+std::string state_frame = "world";
+ros::Time fastlio_stamp;
+bool have_fastlio = false;
+bool publish_visualization = true;
+double fastlio_timeout = 0.5;
+
 void init()
 {
     _DroneState.connected = false;
@@ -141,12 +148,19 @@ void lidar_cb(const nav_msgs::Odometry::ConstPtr &msg)
 
 void lidar_fastlio2_cb(const nav_msgs::Odometry::ConstPtr &msg)
 {
-    if (msg->header.frame_id == "world")
+    Eigen::Quaterniond incoming(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x,
+                                msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
+    if (msg->header.frame_id == fastlio_frame && incoming.coeffs().allFinite() &&
+        std::abs(incoming.squaredNorm()-1.0) < 0.02 && !msg->header.stamp.isZero() &&
+        std::isfinite(msg->pose.pose.position.x) && std::isfinite(msg->pose.pose.position.y) &&
+        std::isfinite(msg->pose.pose.position.z))
     {
         pos_drone_lidar_fastlio2 = Eigen::Vector3d(msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z);
 
         q_lidar_fastlio2 = Eigen::Quaterniond(msg->pose.pose.orientation.w, msg->pose.pose.orientation.x, msg->pose.pose.orientation.y, msg->pose.pose.orientation.z);
         Euler_lidar = quaternion_to_euler(q_lidar_fastlio2);
+        fastlio_stamp = msg->header.stamp;
+        have_fastlio = true;
     }
     else
     {
@@ -215,6 +229,8 @@ void timercb_vision(const ros::TimerEvent &e)
     //fast-lio2
     else if (input_source == 4)
     {
+        const double age = (ros::Time::now()-fastlio_stamp).toSec();
+        if (!have_fastlio || age < -0.1 || age > fastlio_timeout) return;
         vision.pose.position.x = pos_drone_lidar_fastlio2[0] + pos_offset[0];
         vision.pose.position.y = pos_drone_lidar_fastlio2[1] + pos_offset[1];
         vision.pose.position.z = pos_drone_lidar_fastlio2[2] + pos_offset[2];
@@ -229,13 +245,15 @@ void timercb_vision(const ros::TimerEvent &e)
         pub_message(message_pub, prometheus_msgs::Message::NORMAL, msg_name, "Wrong input_source.");
     }
 
-    vision.header.stamp = ros::Time::now();
+    vision.header.stamp = input_source == 4 ? fastlio_stamp : ros::Time::now();
+    vision.header.frame_id = input_source == 4 ? fastlio_frame : state_frame;
     vision_pub.publish(vision);
 }
 
 void timercb_drone_state(const ros::TimerEvent &e)
 {
     _DroneState.header.stamp = ros::Time::now();
+    _DroneState.header.frame_id = state_frame;
     drone_state_pub.publish(_DroneState);
 }
 
@@ -244,7 +262,7 @@ void timercb_rviz(const ros::TimerEvent &e)
     // 发布无人机当前odometry,用于导航及rviz显示
     nav_msgs::Odometry Drone_odom;
     Drone_odom.header.stamp = ros::Time::now();
-    Drone_odom.header.frame_id = "world";
+    Drone_odom.header.frame_id = state_frame;
     Drone_odom.child_frame_id = "base_link";
 
     Drone_odom.pose.pose.position.x = _DroneState.position[0];
@@ -266,7 +284,7 @@ void timercb_rviz(const ros::TimerEvent &e)
     // 发布无人机运动轨迹，用于rviz显示
     geometry_msgs::PoseStamped drone_pos;
     drone_pos.header.stamp = ros::Time::now();
-    drone_pos.header.frame_id = "world";
+    drone_pos.header.frame_id = state_frame;
     drone_pos.pose.position.x = _DroneState.position[0];
     drone_pos.pose.position.y = _DroneState.position[1];
     drone_pos.pose.position.z = _DroneState.position[2];
@@ -282,7 +300,7 @@ void timercb_rviz(const ros::TimerEvent &e)
 
     nav_msgs::Path drone_trajectory;
     drone_trajectory.header.stamp = ros::Time::now();
-    drone_trajectory.header.frame_id = "world";
+    drone_trajectory.header.frame_id = state_frame;
     drone_trajectory.poses = posehistory_vector_;
     trajectory_pub.publish(drone_trajectory);
 }
@@ -295,6 +313,10 @@ int main(int argc, char **argv)
 
     // 读取参数
     nh.param("uav_id", uav_id, 0);
+    nh.param<std::string>("fastlio_frame", fastlio_frame, "world");
+    nh.param<std::string>("state_frame", state_frame, "world");
+    nh.param("publish_visualization", publish_visualization, true);
+    nh.param("fastlio_timeout", fastlio_timeout, 0.5);
     // 定位数据输入源
     nh.param<int>("input_source", input_source, 0);
     //　定位设备偏移量
@@ -381,7 +403,8 @@ int main(int argc, char **argv)
     ros::Timer timer_drone_state_pub = nh.createTimer(ros::Duration(0.05), timercb_drone_state);
 
     // 定时器,发布 rviz显示,保证1Hz以上
-    ros::Timer timer_rviz_pub = nh.createTimer(ros::Duration(0.5), timercb_rviz);
+    ros::Timer timer_rviz_pub;
+    if (publish_visualization) timer_rviz_pub = nh.createTimer(ros::Duration(0.5), timercb_rviz);
 
     // 频率
     ros::Rate rate(100.0);

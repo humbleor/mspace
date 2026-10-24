@@ -1,5 +1,6 @@
 <launch>
   <arg name="uav_id" default="1"/>
+  <arg name="enable_world_frame" default="false"/>
   <!-- size of map, change the size inflate x, y, z according to your application -->
   <arg name="map_size_x" value="200.0"/>
   <arg name="map_size_y" value="200.0"/>
@@ -9,12 +10,13 @@
   <arg name="obj_num" value="10" />
 
   <!-- topic of your odometry such as VIO or LIO -->
-  <arg name="odom_topic" value="mavros/local_position/odom" />
+  <arg name="odom_topic" value="$(eval 'world/odom' if arg('enable_world_frame') else 'mavros/local_position/odom')" />
   <!-- <arg name="odom_topic" value="/drone_Odometry" /> -->
 
   <!-- main algorithm params -->
   <include file="$(find ego_planner)/launch_new/advanced_param_px4.xml">
     <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="odom_twist_in_body" value="$(arg enable_world_frame)"/>
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
@@ -54,7 +56,7 @@
 
     <!-- topic of point cloud measurement, such as from LIDAR  -->
     <!-- don't set camera pose and depth, if you already set this one! -->
-    <arg name="cloud_topic" value="drone_cloud_registered"/>
+    <arg name="cloud_topic" value="$(eval 'world/cloud' if arg('enable_world_frame') else 'drone_cloud_registered')"/>
 
     <!-- intrinsic params of the depth camera -->
     <arg name="cx" value="321.68231201171875"/>
@@ -85,8 +87,8 @@
     <param name="traj_server/time_forward" value="1.0" type="double"/>
   </node>
 
-  <node pkg="odom_visualization" name="odom_visualization" type="odom_visualization" output="screen">
-        <remap from="~odom" to="$(arg odom_topic)"/>
+  <node pkg="odom_visualization" name="uav$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen">
+        <remap from="~odom" to="/uav$(arg uav_id)/$(arg odom_topic)"/>
         <param name="color/a" value="1.0"/>    
         <param name="color/r" value="1.0"/>        
         <param name="color/g" value="0.0"/>
@@ -98,6 +100,7 @@
 
   <!-- <include file="$(find rosmsg_tcp_bridge)/launch/bridge.launch">
     <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="odom_twist_in_body" value="$(arg enable_world_frame)"/>
     <arg name="next_drone_ip" value="$(arg next_drone_ip)"/>
     <arg name="broadcast_ip" value="$(arg broadcast_ip)"/>
   </include> -->

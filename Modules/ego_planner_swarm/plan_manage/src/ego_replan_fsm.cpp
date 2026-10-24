@@ -14,6 +14,7 @@ namespace ego_planner
 
     // 目标点类型：1，手动设定目标点；2，预设目标点；3，生成目标点
     nh.param("fsm/flight_type", target_type_, -1);
+    nh.param("fsm/odom_twist_in_body", odom_twist_in_body_, false);
     // 重规划时间间隔
     nh.param("fsm/thresh_replan_time", replan_thresh_, -1.0);
     // 与目标距离小于该参数时，停止规划
@@ -682,6 +683,12 @@ namespace ego_planner
     odom_orient_.y() = msg->pose.pose.orientation.y;
     odom_orient_.z() = msg->pose.pose.orientation.z;
 
+    if (odom_twist_in_body_) {
+      if (!odom_orient_.coeffs().allFinite() || std::abs(odom_orient_.squaredNorm()-1.0) > 0.02 ||
+          !odom_pos_.allFinite() || !odom_vel_.allFinite()) { have_odom_ = false; return; }
+      odom_orient_.normalize();
+      odom_vel_ = odom_orient_ * odom_vel_;
+    }
     have_odom_ = true;
   }
 

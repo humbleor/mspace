@@ -88,11 +88,13 @@ catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 先核对工作区路径、雷达驱动、雷达与 IMU 参数、飞控连接，以及规划和控制配置，再选择启动脚本：
 
 ```bash
-./ego_fastlio2_one_livox.sh # Livox Mid-360
+./ego_fastlio2_one_livox.sh # Livox Mid-360，默认 world 模式（公共坐标）
 ./ego_fastlio2_ouster.sh   # Ouster
 ```
 
 脚本通过多个终端启动 MAVROS、雷达驱动、Fast-LIO2、控制、规划、地面站和相机。实机规划入口为 `ego_planner` 包的 `launch_new/real_ego_run.launch`。
+
+Livox 单机脚本默认启用公共坐标 world 模式：MAVROS 本地 frame 为 `uav1/fcu_local`，Fast-LIO2 输出 `uav1/lio_init`，`swarm_frame_adapter` 把两者换算到同一个 `world`，规划器改用 `world/odom` 与 `world/cloud`。起飞前需静止约 3 秒，`/uav1/frame_ready` 为 true 后控制器才放行任务。回退旧链路（两套独立 `world`，仅供对比）：`WORLD_FRAME=0 ./ego_fastlio2_one_livox.sh`。说明见 [WORLD_FRAME.md](Modules/swarm_control/WORLD_FRAME.md)。
 
 ### 双机协同
 
