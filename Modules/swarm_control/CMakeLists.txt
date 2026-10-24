@@ -153,7 +153,8 @@ install(TARGETS swarm_frame_adapter RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DES
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
-if(CATKIN_ENABLE_TESTING)
+if(CATKIN_ENABLE_TESTING AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/test/frame_transform_test.cpp)
+  # The test sources are optional for checkouts that strip test directories.
   add_executable(swarm_frame_transform_test test/frame_transform_test.cpp)
   target_compile_options(swarm_frame_transform_test PRIVATE -UNDEBUG)
   add_test(NAME swarm_frame_transform COMMAND swarm_frame_transform_test)
