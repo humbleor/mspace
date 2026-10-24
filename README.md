@@ -129,14 +129,17 @@ UAV1 脚本启动地面站，UAV2 不重复启动。MAVROS 多机脚本退出时
 
 ## 6. 数据记录
 
-`topiclistOS0.sh` 使用 `rosbag record` 记录 Ouster IMU/点云、匹配的 Livox 雷达/IMU 话题，以及指定的压缩彩色图像话题。先加载 ROS 环境，并确保记录目录存在：
+`topiclistOS0.sh` 用 `rosbag record` 只录需要的传感器话题：Ouster/Livox 雷达点云与 IMU、压缩彩色图。不开 `-a`，避免把 `/rosout`、MAVROS 诊断、大体积派生点云一起录进来。bag 写入 `~/data`，`--duration=60` 是每 60 秒切一片，Ctrl+C 结束。
 
 ```bash
-mkdir -p ~/data
+source /opt/ros/noetic/setup.bash && source ~/workspace/mspace/devel/setup.bash
+CHECK_ONLY=1 ./topiclistOS0.sh   # 先看会录哪些话题，不写文件
 ./topiclistOS0.sh
 ```
 
-运行前通过 `rostopic list` 核对实际话题，按需要调整脚本中的记录列表。bag 文件写入 `~/data`。
+正则按整名匹配，同时兼容旧命名与 world 模式：`/livox/lidar_*`、`/uav1/livox/lidar_*`、`/ouster/points`、`/os_cloud_node_1/points`，以及 `/camera`、`/d400` 的压缩图。雷达话题换了名字或前缀时，改正则为上；相机用 `camera:=uav1_camera` 启动的话，把 `uavN_camera` 加进去。
+
+回放注意：world 模式录出的 bag 里 frame 是 `uavX/lio_init` / `uavX/fcu_local`，要用 `enable_world_frame:=true` 的 launch 回放。
 
 
 ## 7. 森林传感器与导航闭环仿真
