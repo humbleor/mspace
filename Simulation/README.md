@@ -1,6 +1,6 @@
 # Mspace 森林仿真
 
-本目录提供森林数据准备、传感器/LIO 轻量闭环和单机 PX4/Gazebo 物理闭环。森林飞行链路为：
+本目录提供森林数据准备、传感器/LIO 轻量闭环和单机/多机 PX4/Gazebo 物理闭环。森林飞行链路为：
 
 ```text
 森林 PCD → 模拟 Mid-360 / IMU → Fast-LIO2 → 状态估计 / PX4 EKF
@@ -119,7 +119,18 @@ bash Simulation/start.sh --help          # 查看全部选项
 
 `--scene`、`--template-bag` 可用于指定森林数据，`--speed` 调整倍速，`--output` 指定新的空输出目录。完整网格配置见 [grid_route.json](px4_forest/config/grid_route.json)。建议先通过短程和小网格，再运行完整任务。
 
-`test` 命令需要本地保留的 `tests/` 目录。测试文件已由 Git 忽略，不随仓库提供，新克隆的工作区不能直接运行该命令。
+`test` 命令需要本地保留的 `tests/` 目录。测试文件已由 Git 忽略，不随仓库提供，新克隆的工作区不能直接运行完整历史测试；多机随代码提供的检查可用 `python3 Simulation/run.py px4 test` 单独运行。
+
+### 多机 PX4 SITL
+
+使用共享世界和配置列表，先双机，再通过追加飞机配置扩展：
+
+```bash
+bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
+  --output artifacts/px4_forest/my_two_forest --duration 120 --speed .25
+```
+
+三机改用 `config/fleet_three.json`。多机入口默认无窗口，支持 `--gui gazebo`；每机独立雷达/IMU、LIO、MAVROS 和规划控制链。配置、坐标、速度、验收与验证边界见 [多机说明](px4_forest/docs/fleet.md)。
 
 ## 5. 查看结果
 
@@ -152,4 +163,4 @@ python3 Simulation/run.py px4 stop --output "$RUN"
 - [原模块接入方式](px4_forest/docs/module_alignment.md)
 - [森林物理碰撞](px4_forest/docs/forest_physical_collision.md)
 
-当前为单机 PX4 SITL；多机 PX4 闭环和实体飞控 HIL 尚未验证。森林点云及简化碰撞几何受原始观测覆盖限制。
+已提供配置驱动的多机 PX4 SITL 入口；具体机数、航线和协同能力须以当前运行结果验证。实体飞控 HIL 尚未验证。森林点云及简化碰撞几何受原始观测覆盖限制。

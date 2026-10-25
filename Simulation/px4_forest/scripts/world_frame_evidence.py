@@ -128,7 +128,7 @@ def command_round_trip(world_targets, fcu_targets, angle, translation, threshold
     return result
 
 
-def cloud_alignment(cloud, map_points, thresholds=None, samples=3000):
+def cloud_alignment(cloud, map_points, thresholds=None, samples=3000, tree=None):
     """Distance from cloud points to the physical forest surfels in local coordinates."""
     limits = dict(DEFAULT_THRESHOLDS, **(thresholds or {}))
     cloud = np.asarray(cloud, dtype=float).reshape(-1, 3)
@@ -137,11 +137,12 @@ def cloud_alignment(cloud, map_points, thresholds=None, samples=3000):
     ground = ground[np.isfinite(ground).all(axis=1)]
     if len(cloud) < 10 or len(ground) < 10:
         raise ValueError("Cloud alignment needs at least 10 finite points on both sides")
-    stride = max(1, len(ground) // 100000)
-    tree = cKDTree(ground[::stride])
+    # Thin only query points. Thinning the reference removes real matches and
+    # makes even a perfectly aligned cloud fail on a sparse forest.
+    tree = cKDTree(ground) if tree is None else tree
     take = np.linspace(0, len(cloud) - 1, min(samples, len(cloud))).astype(int)
     distance, _ = tree.query(cloud[take], k=1)
-    result = {"samples": int(len(take)), "map_points": int(len(ground[::stride])),
+    result = {"samples": int(len(take)), "map_points": int(len(ground)),
               "median_m": float(np.median(distance)), "p90_m": float(np.percentile(distance, 90)),
               "max_m": float(distance.max()),
               "within_tolerance": float(np.mean(distance <= limits["cloud_tolerance_m"])),
@@ -151,7 +152,7 @@ def cloud_alignment(cloud, map_points, thresholds=None, samples=3000):
     return result
 
 
-def initial_anchor(world_rows, ready_sim, thresholds=None):
+def initial_anchor(world_rows, ready_sim, thresholds=None, expected_position=(0.,0.,0.), expected_yaw=0.):
     """The first world pose after readiness must sit at the configured placement."""
     limits = dict(DEFAULT_THRESHOLDS, **(thresholds or {}))
     stamps, yaw, position = yaw_from_rows(world_rows)
@@ -162,16 +163,18 @@ def initial_anchor(world_rows, ready_sim, thresholds=None):
         raise ValueError("No world pose published after readiness")
     first = int(after[0])
     result = {"stamp": float(stamps[first]), "position": position[first].tolist(),
-              "yaw_rad": float(wrap(yaw[first])), "position_error_m": float(np.linalg.norm(position[first])),
+              "yaw_rad": float(wrap(yaw[first])), "position_error_m": float(np.linalg.norm(position[first]-np.asarray(expected_position))),
+              "expected_position": list(expected_position), "expected_yaw": float(expected_yaw),
+              "yaw_error_rad": float(abs(wrap(yaw[first]-expected_yaw))),
               "required_position_m": limits["anchor_position_m"],
               "required_yaw_rad": limits["anchor_yaw_rad"]}
     result["passed"] = bool(result["position_error_m"] <= limits["anchor_position_m"]
-                            and abs(result["yaw_rad"]) <= limits["anchor_yaw_rad"])
+                            and result["yaw_error_rad"] <= limits["anchor_yaw_rad"])
     return result
 
 
 def assess(world_rows, fcu_rows, world_targets, fcu_targets, world_clouds, lio_clouds,
-           local_map, ready_sim=None, thresholds=None):
+           local_map, ready_sim=None, thresholds=None, expected_position=(0.,0.,0.), expected_yaw=0.):
     """Collect every world-frame check; a failed check fails the SITL run.
 
     The cloud check is relative: the transformed cloud must be at least as well
@@ -195,7 +198,7 @@ def assess(world_rows, fcu_rows, world_targets, fcu_targets, world_clouds, lio_c
         failures.append("world<-FCU transform: " + str(exc))
         transform = None
     try:
-        result["initial_anchor"] = initial_anchor(world_rows, ready_sim, limits)
+        result["initial_anchor"] = initial_anchor(world_rows, ready_sim, limits, expected_position, expected_yaw)
         if not result["initial_anchor"]["passed"]:
             failures.append("world origin does not sit at the configured initial placement")
     except ValueError as exc:

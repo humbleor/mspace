@@ -48,19 +48,21 @@ def task_map_layout(goals,grid,planner,advanced):
             "estimate_scope":"GridMap six dense buffers only; excludes planner, LIO, renderer and GUI overhead",
             "z_policy":"Preserve template height, expand only if task goals need more headroom"}
 
-def prepare_modules(root,out,goals,grid=None,world_frame=False):
+def prepare_modules(root,out,goals,grid=None,world_frame=False,uav_id=1,swarm_num=1,initial=(0.,0.,0.,0.),
+                    sensor_prefix="/sim",trigger_topic=None):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root,out=Path(root),Path(out)
     wrapper=ET.Element("launch")
     ET.SubElement(wrapper,"param",name="use_sim_time",value="true")
-    ET.SubElement(wrapper,"param",name="output_root",value=str(out))
+    output_scope=ET.SubElement(wrapper,"group",ns="uav%d"%uav_id) if world_frame else wrapper
+    ET.SubElement(output_scope,"param",name="output_root",value=str(out))
     cfg=yaml.safe_load((root/"Modules/fast_lio2/config/mid360.yaml").read_text())
-    sensor_topic={"lidar":"/sim/mid360/lidar","imu":"/sim/mid360/imu"}
+    sensor_topic={"lidar":sensor_prefix+"/mid360/lidar","imu":sensor_prefix+"/mid360/imu"}
     if not world_frame:
         for original,simulation in [(cfg["common"]["lid_topic"],sensor_topic["lidar"]),(cfg["common"]["imu_topic"],sensor_topic["imu"])]:
             ET.SubElement(wrapper,"remap",attrib={"from":original,"to":simulation})
     lio=ET.SubElement(wrapper,"include",file=str(root/"Modules/fast_lio2/launch/mapping_mid360.launch"))
-    ET.SubElement(lio,"arg",name="uav_id",value="1")
+    ET.SubElement(lio,"arg",name="uav_id",value=str(uav_id))
     ET.SubElement(lio,"arg",name="rviz",value="false")
     if world_frame:
         # World mode derives sensor topics from the namespace, so bind them directly.
@@ -68,13 +70,26 @@ def prepare_modules(root,out,goals,grid=None,world_frame=False):
         ET.SubElement(lio,"arg",name="lidar_topic",value=sensor_topic["lidar"])
         ET.SubElement(lio,"arg",name="imu_topic",value=sensor_topic["imu"])
     control=ET.SubElement(wrapper,"include",file=str(root/"Modules/swarm_control/launch/ego_swarm_control.launch"))
-    control_args={"uav_id":"1","swarm_num":"1","input_source":"4"}
+    control_args={"uav_id":str(uav_id),"swarm_num":str(swarm_num),"input_source":"4"}
     if world_frame:
-        control_args.update({"enable_world_frame":"true","uav_init_x":"0.0","uav_init_y":"0.0",
-                            "uav_init_z":"0.0","uav_init_yaw":"0.0"})
+        control_args.update({"enable_world_frame":"true",**dict(zip(("uav_init_x","uav_init_y","uav_init_z","uav_init_yaw"),map(str,initial)))})
     for k,v in control_args.items():
         ET.SubElement(control,"arg",name=k,value=v)
+    # The controller reads this case-sensitive parameter; the template's
+    # lowercase takeoff_height is not consumed by the current implementation.
+    ET.SubElement(wrapper,"param",name=f"/swarm_controller_uav_{uav_id}/Takeoff_height",value="1.2",type="double")
     planner=ET.parse(root/"Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch")
+    for e in planner.getroot().findall("arg"):
+        if e.get("name")=="uav_id":
+            e.set("value",str(uav_id));e.attrib.pop("default",None)
+    if world_frame:
+        # Legacy visualization broadcasts global /base, /laser, /camera frames.
+        # The per-aircraft adapter/MAVROS own all world-mode TF instead.
+        for node in planner.getroot().findall("node"):
+            if node.get("type")=="odom_visualization":
+                node.find("param[@name='tf45']").set("value","false")
+    if trigger_topic:
+        planner.getroot().insert(0,ET.Element("remap",attrib={"from":"/traj_start_trigger","to":trigger_topic}))
     if world_frame:
         for e in planner.getroot().findall("arg"):
             if e.get("name")=="enable_world_frame":
@@ -98,14 +113,14 @@ def prepare_modules(root,out,goals,grid=None,world_frame=False):
         if e.get("name") in overrides:e.set("value",overrides[e.get("name")])
     # SITL uses the existing hardware/RC trigger gate: do not start a
     # trajectory before the module controller has completed takeoff.
-    ET.SubElement(planner.getroot(),"param",name="/uav_1_ego_planner_node/fsm/realworld_experiment",value="true",type="bool")
-    ET.SubElement(planner.getroot(),"param",name="/uav_1_ego_planner_node/fsm/strict_waypoint_tracking",value="true",type="bool")
+    ET.SubElement(planner.getroot(),"param",name=f"/uav_{uav_id}_ego_planner_node/fsm/realworld_experiment",value="true",type="bool")
+    ET.SubElement(planner.getroot(),"param",name=f"/uav_{uav_id}_ego_planner_node/fsm/strict_waypoint_tracking",value="true",type="bool")
     if not grid:
         # Scene-derived routes use the original PRESET_TARGET workflow.
-        ET.SubElement(planner.getroot(),"param",name="/uav_1_ego_planner_node/fsm/waypoint_num",value=str(len(goals)-1),type="int")
+        ET.SubElement(planner.getroot(),"param",name=f"/uav_{uav_id}_ego_planner_node/fsm/waypoint_num",value=str(len(goals)-1),type="int")
         for i,pos in enumerate(goals[1:]):
             for axis,value in zip("xyz",pos):
-                ET.SubElement(planner.getroot(),"param",name="/uav_1_ego_planner_node/fsm/waypoint%d_%s"%(i,axis),value=str(float(value)),type="double")
+                ET.SubElement(planner.getroot(),"param",name=f"/uav_{uav_id}_ego_planner_node/fsm/waypoint%d_%s"%(i,axis),value=str(float(value)),type="double")
     planner.write(out/"planner_modules.launch",encoding="unicode")
     ET.SubElement(wrapper,"include",file=str(out/"planner_modules.launch"))
     ET.ElementTree(wrapper).write(out/"modules.launch",encoding="unicode")
@@ -113,11 +128,11 @@ def prepare_modules(root,out,goals,grid=None,world_frame=False):
             "planner_template":"Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch",
             "control_template":"Modules/swarm_control/launch/ego_swarm_control.launch",
             "flight_type":3 if grid else 2,"control_takeoff_height":1.2,
-            "planner_odom":"/uav1/world/odom" if world_frame else "/uav1/mavros/local_position/odom",
-            "planner_cloud":"/uav1/world/cloud" if world_frame else "/uav1/drone_cloud_registered","traj_time_forward":1.0,
+            "planner_odom":f"/uav{uav_id}/world/odom" if world_frame else f"/uav{uav_id}/mavros/local_position/odom",
+            "planner_cloud":f"/uav{uav_id}/world/cloud" if world_frame else f"/uav{uav_id}/drone_cloud_registered","traj_time_forward":1.0,
             "frame_mode":"world" if world_frame else "legacy",
-            "frame_owner":{"world/odom":"/swarm_frame_adapter_uav_1","world/cloud":"/swarm_frame_adapter_uav_1",
-                           "mavros/setpoint_raw/local":"/swarm_frame_adapter_uav_1"} if world_frame else {},
+            "frame_owner":{"world/odom":f"/swarm_frame_adapter_uav_{uav_id}","world/cloud":f"/swarm_frame_adapter_uav_{uav_id}",
+                           "mavros/setpoint_raw/local":f"/swarm_frame_adapter_uav_{uav_id}"} if world_frame else {},
             "overrides":dict(overrides,realworld_experiment=True,strict_waypoint_tracking=True),"algorithms_modified":True,
             "simulation_map_layout":layout,
             "module_changes":["Optional strict native mission scheduling with odometry arrivals; optimizer unchanged"]}

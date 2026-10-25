@@ -4,9 +4,11 @@ set -eo pipefail
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 usage() {
   cat <<'HELP'
-Usage: bash Simulation/start.sh [full|small|short|hover|test|build] [options]
+Usage: bash Simulation/start.sh [full|small|short|hover|swarm|test|build] [options]
   full   Default: original generateWps 15-point grid, Gazebo + RViz.
   small  Six-point grid.   short  Takeoff + first scene goal.
+  swarm  N-UAV shared-world run: --fleet CONFIG --output DIR [--stage hover|forest].
+         Other arguments are passed to: python3 Simulation/run.py px4 swarm --help
   hover  PX4/physics only. test  All simulation tests. build  PX4/plugin build.
 Options for flight modes (relative paths use the project root):
   --scene PATH          Forest scene JSON.
@@ -35,13 +37,21 @@ die() { printf 'Error: %s\n' "$*" >&2; exit 2; }
 need_value() { [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || die "$1 needs a value"; }
 mode=full
 if [[ $# -gt 0 && "$1" != -* ]]; then mode="$1"; shift; fi
-case "$mode" in full|small|short|hover|test|build) ;; *) usage; die "Unknown mode: $mode" ;; esac
+case "$mode" in full|small|short|hover|swarm|test|build) ;; *) usage; die "Unknown mode: $mode" ;; esac
 scene="$PROJECT_ROOT/artifacts/forest_lio/route_125_155.json"
 bag="$HOME/bagfiles/yxb_20260208-104116.bag"
 speed=.5; duration=""; output=""; waypoints=""; instance=20; gui=both; keep_open=1; dry_run=0
 body_radius=.4; obstacle_radius=.2; max_truth_gap=.05
 collision_model=ego
 forest_geometry=""; tree_collision=1; keep_contact_open=0
+swarm_args=()
+if [[ "$mode" == swarm ]]; then
+  swarm_args=("$@")
+  if [[ " ${swarm_args[*]} " == *" --help "* || " ${swarm_args[*]} " == *" -h "* ]]; then
+    exec python3 "$PROJECT_ROOT/Simulation/run.py" px4 swarm --help
+  fi
+  set --
+fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -79,6 +89,9 @@ set -u
 export DISABLE_ROS1_EOL_WARNINGS=1
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=4
+if [[ "$mode" == swarm ]]; then
+  exec python3 "$PROJECT_ROOT/Simulation/run.py" px4 swarm "${swarm_args[@]}"
+fi
 print_command() { printf 'Command:'; printf ' %q' "$@"; printf '\n'; }
 if [[ "$mode" == test || "$mode" == build ]]; then
   if [[ "$mode" == test ]]; then command=(python3 "$PROJECT_ROOT/Simulation/run.py" test)

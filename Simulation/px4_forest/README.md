@@ -120,3 +120,8 @@ python3 Simulation/run.py px4 run --stage forest \
 - `result.json` 状态为 ok 才代表该次验收通过；有日志不代表成功。
 
 官方参考：[Gazebo SITL](https://docs.px4.io/v1.13/en/simulation/gazebo)、[外部位姿融合](https://docs.px4.io/v1.13/en/ros/external_position_estimation)、[MAVROS OFFBOARD](https://docs.px4.io/v1.13/en/ros/mavros_offboard_python)。
+
+
+## 多机共享世界
+
+新增 `python3 Simulation/run.py px4 swarm --fleet CONFIG --output RUN`，以及加载环境的 `bash Simulation/start.sh swarm ...`。配置驱动 N 个独立 PX4、模拟雷达/IMU 和导航链路，共享森林与时钟；双机/三机示例和验收限制见 [多机说明](docs/fleet.md)。原 `px4 run` 单机入口继续保留。

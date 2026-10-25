@@ -15,15 +15,24 @@ class ForestPlant: public ModelPlugin {
   std::unique_ptr<ros::NodeHandle> nh;
   ros::Publisher imu,truth,contacts;
   double last=-1;
+  double physics_rate=0;
+  bool physics_rate_applied=false;
+  std::string owner,imu_frame="livox_frame",body_frame="base_link";
 public:
-  void Load(physics::ModelPtr model,sdf::ElementPtr) override {
+  void Load(physics::ModelPtr model,sdf::ElementPtr sdf) override {
     if(!ros::isInitialized()){int argc=0;char **argv=nullptr;ros::init(argc,argv,"forest_plant",ros::init_options::NoSigintHandler);}
     nh.reset(new ros::NodeHandle());
     link=model->GetLink("base_link");world=model->GetWorld();
     if(!link)gzthrow("Iris base_link missing");
-    imu=nh->advertise<sensor_msgs::Imu>("/sim/mid360/imu",1000);
-    truth=nh->advertise<nav_msgs::Odometry>("/sim/plant/odom",1000);
-    contacts=nh->advertise<gazebo_msgs::ContactsState>("/sim/plant/tree_contacts",1000);
+    owner=model->GetScopedName()+"::";
+    if(sdf->HasElement("physics_update_rate"))physics_rate=sdf->Get<double>("physics_update_rate");
+    std::string prefix="/sim";
+    if(sdf->HasElement("sensor_prefix"))prefix=sdf->Get<std::string>("sensor_prefix");
+    if(sdf->HasElement("imu_frame"))imu_frame=sdf->Get<std::string>("imu_frame");
+    if(sdf->HasElement("body_frame"))body_frame=sdf->Get<std::string>("body_frame");
+    imu=nh->advertise<sensor_msgs::Imu>(prefix+"/mid360/imu",1000);
+    truth=nh->advertise<nav_msgs::Odometry>(prefix+"/plant/odom",1000);
+    contacts=nh->advertise<gazebo_msgs::ContactsState>(prefix+"/plant/tree_contacts",1000);
     world->Physics()->GetContactManager()->SetNeverDropContacts(true);
     update=event::Events::ConnectWorldUpdateBegin(std::bind(&ForestPlant::Tick,this));
     contact_update=event::Events::ConnectWorldUpdateEnd(std::bind(&ForestPlant::Contacts,this));
@@ -37,8 +46,13 @@ public:
       auto c=manager->GetContact(i);
       if (!c || !c->collision1 || !c->collision2) continue;
       auto n1=c->collision1->GetScopedName(), n2=c->collision2->GetScopedName();
-      if (n1.find("forest_collision_geometry::")==std::string::npos &&
-          n2.find("forest_collision_geometry::")==std::string::npos) continue;
+      const bool own1=n1.compare(0,owner.size(),owner)==0;
+      const bool own2=n2.compare(0,owner.size(),owner)==0;
+      if(!own1 && !own2)continue;
+      const auto &other=own1?n2:n1;
+      const bool tree=other.find("forest_collision_geometry::")!=std::string::npos;
+      const bool aircraft=other.find("forest_iris_")==0;
+      if(!tree && !aircraft)continue;
       gazebo_msgs::ContactState state;
       state.collision1_name=n1; state.collision2_name=n2;
       for (int j=0;j<c->count;++j) {
@@ -48,7 +62,7 @@ public:
         state.contact_positions.push_back(position);state.contact_normals.push_back(normal);
         state.depths.push_back(c->depths[j]);
         geometry_msgs::Wrench wrench;
-        bool first=n1.find("forest_collision_geometry::")==std::string::npos;
+        bool first=own1;
         auto force=first?c->wrench[j].body1Force:c->wrench[j].body2Force;
         auto torque=first?c->wrench[j].body1Torque:c->wrench[j].body2Torque;
         wrench.force.x=force.X();wrench.force.y=force.Y();wrench.force.z=force.Z();
@@ -64,6 +78,8 @@ public:
     contacts.publish(message);
   }
   void Tick() {
+    // Apply only after every model Load has finished its lockstep checks.
+    if(!physics_rate_applied && physics_rate>0){world->Physics()->SetRealTimeUpdateRate(physics_rate);physics_rate_applied=true;}
     double t=world->SimTime().Double();
     if(t<=0 || (last>=0 && t-last<.0039))return;
     last=t;
@@ -71,11 +87,11 @@ public:
     auto v=link->WorldLinearVel();
     auto a=pose.Rot().RotateVectorReverse(link->WorldLinearAccel()-world->Gravity())/9.81;
     auto w=link->RelativeAngularVel();
-    sensor_msgs::Imu m;m.header.stamp.fromSec(t);m.header.frame_id="livox_frame";m.orientation_covariance[0]=-1;
+    sensor_msgs::Imu m;m.header.stamp.fromSec(t);m.header.frame_id=imu_frame;m.orientation_covariance[0]=-1;
     m.angular_velocity.x=w.X();m.angular_velocity.y=w.Y();m.angular_velocity.z=w.Z();
     m.linear_acceleration.x=a.X();m.linear_acceleration.y=a.Y();m.linear_acceleration.z=a.Z();
     imu.publish(m);
-    nav_msgs::Odometry o;o.header=m.header;o.header.frame_id="gazebo_world";o.child_frame_id="base_link";
+    nav_msgs::Odometry o;o.header=m.header;o.header.frame_id="gazebo_world";o.child_frame_id=body_frame;
     o.pose.pose.position.x=pose.Pos().X();o.pose.pose.position.y=pose.Pos().Y();o.pose.pose.position.z=pose.Pos().Z();
     o.pose.pose.orientation.x=pose.Rot().X();o.pose.pose.orientation.y=pose.Rot().Y();o.pose.pose.orientation.z=pose.Rot().Z();o.pose.pose.orientation.w=pose.Rot().W();
     o.twist.twist.linear.x=v.X();o.twist.twist.linear.y=v.Y();o.twist.twist.linear.z=v.Z();
