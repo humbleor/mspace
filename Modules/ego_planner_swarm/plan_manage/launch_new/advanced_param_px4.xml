@@ -30,6 +30,7 @@
   <arg name="obj_num_set"/>
   
   <arg name="uav_id"/>
+  <arg name="use_bridge" default="false"/>
 
   <arg name="step_X"/>
   <arg name="step_Y"/>
@@ -47,12 +48,17 @@
 
   <!-- main node -->
   <node pkg="ego_planner" name="uav_$(arg uav_id)_ego_planner_node" type="ego_planner_node" output="screen" required="true">
+    <!-- TX and RX are deliberately different, including on a shared ROS master. -->
+    <remap if="$(arg use_bridge)" from="/uav$(arg uav_id)/planning/swarm_trajs" to="/uav$(arg uav_id)/bridge/tx/multi_traj"/>
+    <remap if="$(eval arg('use_bridge') and arg('uav_id') &gt; 1)" from="$(eval '/uav'+str(arg('uav_id')-1)+'/planning/swarm_trajs')" to="/uav$(arg uav_id)/bridge/rx/prev_multi_traj"/>
+    <remap if="$(arg use_bridge)" from="~planning/bridge_request_current" to="/uav$(arg uav_id)/bridge/request_current"/>
+    <param name="fsm/use_bridge" value="$(arg use_bridge)"/>
     <!-- /uav1/mavros/local_position/odom -->
     <remap from="~odom_world" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
     <remap from="~planning/bspline" to = "/uav$(arg uav_id)/planning/bspline"/>
     <remap from="~planning/data_display" to = "/uav$(arg uav_id)/planning/data_display"/>
-    <remap from="~planning/broadcast_bspline_from_planner" to = "/broadcast_bspline"/>
-    <remap from="~planning/broadcast_bspline_to_planner" to = "/broadcast_bspline"/>
+    <remap from="~planning/broadcast_bspline_from_planner" to="$(eval '/uav'+str(arg('uav_id'))+'/bridge/tx/bspline' if arg('use_bridge') else '/broadcast_bspline')"/>
+    <remap from="~planning/broadcast_bspline_to_planner" to="$(eval '/uav'+str(arg('uav_id'))+'/bridge/rx/bspline' if arg('use_bridge') else '/broadcast_bspline')"/>
 
     <remap from="~grid_map/odom" to="/uav$(arg uav_id)/$(arg odometry_topic)"/>
     <remap from="~grid_map/cloud" to="/uav$(arg uav_id)/$(arg cloud_topic)"/>

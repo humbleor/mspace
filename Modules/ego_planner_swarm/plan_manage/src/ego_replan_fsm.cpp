@@ -27,6 +27,7 @@ namespace ego_planner
     nh.param("fsm/realworld_experiment", flag_realworld_experiment_, false);
     // 未知
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
+    nh.param("fsm/use_bridge", bridge_mode_, false);
     // 真实实验中需要等待"/traj_start_trigger"话题
     have_trigger_ = !flag_realworld_experiment_;
     // 读取waypoint
@@ -82,6 +83,10 @@ namespace ego_planner
 
     broadcast_bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/broadcast_bspline_from_planner", 10);
     broadcast_bspline_sub_ = nh.subscribe("planning/broadcast_bspline_to_planner", 100, &EGOReplanFSM::BroadcastBsplineCallback, this, ros::TransportHints().tcpNoDelay());
+
+    if (bridge_mode_)
+      bridge_request_sub_ = nh.subscribe("planning/bridge_request_current", 1,
+          &EGOReplanFSM::bridgeRequestCallback, this);
 
     bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/bspline", 10);
     data_disp_pub_ = nh.advertise<traj_utils::DataDisp>("planning/data_display", 100);
@@ -720,6 +725,9 @@ namespace ego_planner
         }
       }
 
+      if (bridge_mode_ && planner_manager_->swarm_trajs_buf_[id].drone_id == int(id) &&
+          planner_manager_->swarm_trajs_buf_[id].start_time_ > msg->start_time) return;
+
       /* Test distance to the agent */
       Eigen::Vector3d cp0(msg->pos_pts[0].x, msg->pos_pts[0].y, msg->pos_pts[0].z);
       Eigen::Vector3d cp1(msg->pos_pts[1].x, msg->pos_pts[1].y, msg->pos_pts[1].z);
@@ -765,6 +773,15 @@ namespace ego_planner
       planner_manager_->swarm_trajs_buf_[id].start_pos_ = planner_manager_->swarm_trajs_buf_[id].position_traj_.evaluateDeBoorT(0);
 
       planner_manager_->swarm_trajs_buf_[id].start_time_ = msg->start_time;
+
+      // Retain the freshest predecessor message for rebuilding a current TCP chain.
+      if (bridge_mode_ && int(id) < planner_manager_->pp_.drone_id)
+      {
+        if (multi_bspline_msgs_buf_.traj.size() <= id)
+          multi_bspline_msgs_buf_.traj.resize(id + 1);
+        auto &saved = multi_bspline_msgs_buf_.traj[id];
+        if (saved.start_time <= msg->start_time) saved = *msg;
+      }
     }
     // planner_manager_->swarm_trajs_buf_[id].start_time_ = ros::Time::now(); // Un-reliable time sync
 
@@ -776,10 +793,19 @@ namespace ego_planner
     }
   }
 
-  void EGOReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &msg)
+  void EGOReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &incoming)
   {
-
-    multi_bspline_msgs_buf_.traj.clear();
+    auto msg = incoming;
+    if (bridge_mode_)
+    {
+      msg.reset(new traj_utils::MultiBsplines(*incoming));
+      for (size_t i = 1; i < msg->traj.size() && i < multi_bspline_msgs_buf_.traj.size(); ++i)
+      {
+        const auto &saved = multi_bspline_msgs_buf_.traj[i];
+        if (saved.drone_id == int(i) && saved.start_time > msg->traj[i].start_time)
+          msg->traj[i] = saved;
+      }
+    }
     multi_bspline_msgs_buf_ = *msg;
 
     // cout << "\033[45;33mmulti_bspline_msgs_buf.drone_id_from=" << multi_bspline_msgs_buf_.drone_id_from << " multi_bspline_msgs_buf_.traj.size()=" << multi_bspline_msgs_buf_.traj.size() << "\033[0m" << endl;
@@ -800,11 +826,18 @@ namespace ego_planner
     {
       std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
 
-      planner_manager_->swarm_trajs_buf_.clear();
-      planner_manager_->swarm_trajs_buf_.resize(msg->traj.size());
+      auto &cache = planner_manager_->swarm_trajs_buf_;
+      if (!bridge_mode_) cache.clear();
+      const auto previous_size = cache.size();
+      if (!bridge_mode_ || cache.size() < msg->traj.size()) cache.resize(msg->traj.size());
+      for (size_t i = previous_size; i < cache.size(); ++i) cache[i].drone_id = -1;
 
       for (size_t i = 0; i < msg->traj.size(); i++)
       {
+        // TCP snapshots can arrive after a newer UDP replan. Preserve newer data
+        // and peers outside the predecessor range when refreshing this chain.
+        if (bridge_mode_ && cache[i].drone_id == int(i) &&
+            cache[i].start_time_ >= msg->traj[i].start_time) continue;
         if (msg->traj[i].pos_pts.size() == 0)
         {
           planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
@@ -1358,7 +1391,31 @@ namespace ego_planner
     return plan_and_refine_success;
   }
 
-  void EGOReplanFSM::publishSwarmTrajs(bool startup_pub)
+  void EGOReplanFSM::bridgeRequestCallback(const std_msgs::EmptyConstPtr &)
+  {
+    // Only a currently executing trajectory may repair a missed startup chain.
+    // Preserve its source time, and never revive an expired or emergency path.
+    if (!have_odom_ || exec_state_ != EXEC_TRAJ) return;
+    const auto info = &planner_manager_->local_data_;
+    const auto now = ros::Time::now();
+    const double age = (now - info->start_time_).toSec();
+    if (info->start_time_.isZero() || !std::isfinite(age) || age < 0 ||
+        !std::isfinite(info->duration_) || age >= info->duration_) return;
+    const int id = planner_manager_->pp_.drone_id;
+    if (id > 1 && multi_bspline_msgs_buf_.traj.size() < size_t(id)) return;
+    for (int i = 1; i < id; ++i)
+    {
+      const auto &m = multi_bspline_msgs_buf_.traj[i];
+      if (m.drone_id != i || m.order != 3 || m.pos_pts.size() < 4 ||
+          m.knots.size() != m.pos_pts.size() + 4 || m.start_time.isZero()) return;
+      const double predecessor_age = (now - m.start_time).toSec();
+      const double end = m.knots[m.pos_pts.size()];
+      if (!std::isfinite(end) || predecessor_age < 0 || predecessor_age >= end) return;
+    }
+    publishSwarmTrajs(true, false);
+  }
+
+  void EGOReplanFSM::publishSwarmTrajs(bool startup_pub, bool broadcast)
   {
     auto info = &planner_manager_->local_data_;
 
@@ -1411,7 +1468,7 @@ namespace ego_planner
       swarm_trajs_pub_.publish(multi_bspline_msgs_buf_);
     }
 
-    broadcast_bspline_pub_.publish(bspline);
+    if (broadcast) broadcast_bspline_pub_.publish(bspline);
   }
 
   bool EGOReplanFSM::callEmergencyStop(Eigen::Vector3d stop_pos)

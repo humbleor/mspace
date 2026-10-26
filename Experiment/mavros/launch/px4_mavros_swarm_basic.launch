@@ -7,6 +7,9 @@
 	<!-- 无人机编号（PX4内部参数） 	MAV_SYS_ID 从1开始，对应uav_id--> 
     <!-- n号飞机 -->
 	<arg name="uav_name" default="$(eval 'uav' + str(arg('uav_id')))"/>
+    <arg name="tfmini_id" default="0"/>
+    <arg name="tfmini_fov" default="0.034906585"/>
+    <!-- No automatic TF from unknown installation geometry; frame is namespaced. -->
     <group ns="$(arg uav_name)">
 		<!-- 启动MAVROS -->
 		<node pkg="mavros" type="mavros_node" name="mavros" output="screen">
@@ -17,6 +20,14 @@
 			<param name="fcu_protocol" value="v2.0" />
 			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_pluginlists.yaml" />
 			<rosparam command="load" file="$(find mavros_bringup)/launch/px4_config.yaml" />
+            <rosparam ns="distance_sensor/tfmini_down" subst_value="true">
+              subscriber: false
+              id: $(arg tfmini_id)
+              frame_id: "$(arg uav_name)/tfmini_link"
+              orientation: PITCH_270
+              field_of_view: $(arg tfmini_fov)
+              send_tf: false
+            </rosparam>
             <param if="$(arg enable_world_frame)" name="local_position/frame_id" value="$(arg uav_name)/fcu_local"/>
             <param if="$(arg enable_world_frame)" name="local_position/tf/frame_id" value="$(arg uav_name)/fcu_local"/>
             <param if="$(arg enable_world_frame)" name="local_position/tf/child_frame_id" value="$(arg uav_name)/base_link"/>

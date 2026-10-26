@@ -7,6 +7,7 @@
   <arg name="uav_init_z" default="0.0"/>
   <arg name="uav_init_yaw" default="0.0"/>
   <arg name="input_source" default="4"/>
+  <arg name="takeoff_height" default="1.2"/>
   <arg name="frame_adapter_config" default="$(find prometheus_swarm_control)/launch/frame_adapter.yaml"/>
   <!-- Sensor/vision compensation is independent of the inter-UAV initial placement. -->
   <arg name="vision_offset_x" default="0.0"/>
@@ -42,7 +43,7 @@
     <param name="uav_id" value="$(arg uav_id)"/>
     <param name="controller_flag" value="1"/>
     <param name="controller_hz" value="50.0"/>
-    <param name="takeoff_height" value="1.2"/>
+    <param name="takeoff_height" value="$(arg takeoff_height)"/>
     <param name="require_frame_ready" value="$(arg enable_world_frame)"/>
     <rosparam command="load" file="$(find prometheus_swarm_control)/launch/ego_control_lidar_config.yaml"/>
     <param if="$(arg enable_world_frame)" name="drift_correction/enable" value="false"/>

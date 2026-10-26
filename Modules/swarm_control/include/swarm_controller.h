@@ -61,7 +61,7 @@ prometheus_msgs::SwarmCommand Command_Now;      // 无人机当前执行命令
 prometheus_msgs::SwarmCommand Command_Last;     // 无人机上一条执行命令
 
 
-float Takeoff_height;                           // 默认起飞高度
+float takeoff_height;                           // 默认起飞高度
 Eigen::Vector3d Takeoff_position;               // 起飞位置
 float Disarm_height;                            // 自动上锁高度
 float Land_speed;                               // 降落速度
@@ -181,7 +181,7 @@ void init(ros::NodeHandle &nh)
     nh.param<int>("collision_flag", collision_flag, 1);
     
     // 起飞高度,上锁高度,降落速度
-    nh.param<float>("Takeoff_height", Takeoff_height, 1.0);
+    nh.param<float>("takeoff_height", takeoff_height, 1.0);
     nh.param<float>("Disarm_height", Disarm_height, 0.2);
     nh.param<float>("Land_speed", Land_speed, 0.2);
     nh.param<int>("Land_mode", Land_mode, 0);
@@ -880,7 +880,7 @@ void printf_param()
     cout << "k_p    : "<< k_p <<"  "<<endl;
     cout << "k_aij       : "<< k_aij <<"  "<<endl;
     cout << "k_gamma       : "<< k_gamma <<"  "<<endl;
-    cout << "Takeoff_height   : "<< Takeoff_height<<" [m] "<<endl;
+    cout << "takeoff_height   : "<< takeoff_height<<" [m] "<<endl;
     cout << "Disarm_height    : "<< Disarm_height <<" [m] "<<endl;
     cout << "Land_speed       : "<< Land_speed <<" [m/s] "<<endl;
     cout << "geo_fence_x : "<< geo_fence_x[0] << " [m]  to  "<<geo_fence_x[1] << " [m]"<< endl;

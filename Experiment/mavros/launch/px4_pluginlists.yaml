@@ -5,7 +5,6 @@ plugin_blacklist:
 - 3dr_radio
 - cam_imu_sync
 - altitude
-- distance_sensor
 - fake_gps
 - gps_rtk
 - hil

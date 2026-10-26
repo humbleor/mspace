@@ -1,931 +1,332 @@
 #include <ros/ros.h>
-#include <boost/thread.hpp>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <iostream>
-#include <mutex>
-#include <traj_utils/MultiBsplines.h>
-#include <traj_utils/Bspline.h>
-#include <nav_msgs/Odometry.h>
-#include <std_msgs/Empty.h>
+#include <ros/serialization.h>
 #include <std_msgs/Bool.h>
+#include <std_msgs/Empty.h>
+#include <traj_utils/Bspline.h>
+#include <traj_utils/MultiBsplines.h>
 
-#include <unistd.h>
 #include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <netinet/tcp.h>
-#define PORT 8080
-#define UDP_PORT 8081
-#define BUF_LEN 1048576    // 1MB
-#define BUF_LEN_SHORT 1024 // 1KB
+#include <sys/socket.h>
+#include <sys/select.h>
+#include <poll.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstring>
+#include <deque>
+#include <mutex>
+#include <set>
+#include <stdexcept>
+#include <thread>
+#include <tuple>
+#include <vector>
 
-using namespace std;
+namespace {
+using Clock = std::chrono::steady_clock;
+using Bytes = std::vector<uint8_t>;
+constexpr size_t HEADER = 12, MAX_TCP = 1024 * 1024, MAX_UDP = 60000;
+enum Kind : uint16_t { MULTI = 1, SINGLE = 2 };
 
-int send_sock_, server_fd_, recv_sock_, udp_server_fd_, udp_send_fd_;
-ros::Subscriber swarm_trajs_sub_, other_odoms_sub_, emergency_stop_sub_, one_traj_sub_;
-ros::Publisher swarm_trajs_pub_, other_odoms_pub_, emergency_stop_pub_, one_traj_pub_;
-string tcp_ip_, udp_ip_;
-int drone_id_;
-double odom_broadcast_freq_;
-char send_buf_[BUF_LEN], recv_buf_[BUF_LEN], udp_recv_buf_[BUF_LEN], udp_send_buf_[BUF_LEN];
-// protects send_sock_ across ROS callback (writer) and lazy reconnect
-std::mutex tcp_send_mtx_;
-// background reconnect state
-double reconnect_backoff_sec_ = 1.0;
-const double RECONNECT_BACKOFF_MAX = 30.0;
-bool tcp_connected_ = false;
-ros::Publisher connection_state_pub_;
-struct sockaddr_in addr_udp_send_;
-traj_utils::MultiBsplinesPtr bsplines_msg_;
-nav_msgs::OdometryPtr odom_msg_;
-std_msgs::EmptyPtr stop_msg_;
-traj_utils::BsplinePtr bspline_msg_;
-
-enum MESSAGE_TYPE
-{
-  ODOM = 888,
-  MULTI_TRAJ,
-  ONE_TRAJ,
-  STOP
-} massage_type_;
-
-// Tier 1 helper: enable kernel-level TCP keepalive so dead peer is detected in seconds,
-// not after send() finally fails (which can take many seconds).
-void set_keepalive(int sock)
-{
-  int enable = 1;
-  setsockopt(sock, SOL_SOCKET, SO_KEEPALIVE, &enable, sizeof(enable));
-#ifdef TCP_KEEPIDLE
-  int idle = 5;    // first probe after 5s idle
-  setsockopt(sock, IPPROTO_TCP, TCP_KEEPIDLE, &idle, sizeof(idle));
-  int intvl = 3;   // probe every 3s
-  setsockopt(sock, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof(intvl));
-  int cnt = 2;     // 2 failed probes => dead (~11s total)
-  setsockopt(sock, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof(cnt));
-#endif
+// MSB2 is deliberately incompatible with the old native-size_t wire format.
+// Both peers must be upgraded. ROS payloads use bounded preflight before allocation.
+struct Header { uint32_t length; uint16_t kind, sender; };
+bool header(const uint8_t *p, Header &h) {
+  if (std::memcmp(p, "MSB2", 4)) return false;
+  uint32_t n; uint16_t k, s;
+  std::memcpy(&n, p+4, 4); std::memcpy(&k, p+8, 2); std::memcpy(&s, p+10, 2);
+  h = {ntohl(n), ntohs(k), ntohs(s)};
+  return h.length > 0 && h.length <= MAX_TCP && (h.kind == MULTI || h.kind == SINGLE);
 }
-
-// Tier 1 helper: publish /uav{X}/bridge_connection_state (Bool), dedupe + log on edge.
-void publish_connection_state(bool connected)
-{
-  if (connected == tcp_connected_) return;
-  tcp_connected_ = connected;
-  if (connected) ROS_INFO("[bridge_node] TCP link UP");
-  else           ROS_WARN("[bridge_node] TCP link DOWN, will reconnect");
-  std_msgs::Bool msg;
-  msg.data = connected;
-  if (connection_state_pub_) connection_state_pub_.publish(msg);
+struct Probe {
+  const uint8_t *p; size_t left;
+  bool skip(size_t n) { if (n > left) return false; p += n; left -= n; return true; }
+  bool u32(uint32_t &n) {
+    if (left < 4) return false;
+    n = uint32_t(p[0]) | (uint32_t(p[1]) << 8) | (uint32_t(p[2]) << 16) | (uint32_t(p[3]) << 24);
+    return skip(4);
+  }
+  bool array(size_t stride) {
+    uint32_t n;
+    return u32(n) && n <= 10000 && n <= left / stride && skip(size_t(n)*stride);
+  }
+  bool spline() {
+    // id, order, traj_id, start_time; then knots, positions, yaw, yaw_dt.
+    return skip(24) && array(8) && array(24) && array(8) && skip(8);
+  }
+};
+bool preflight(const Bytes &b, uint16_t kind) {
+  Probe p{b.data(), b.size()};
+  if (kind == SINGLE) return p.spline() && !p.left;
+  uint32_t count;
+  if (!p.skip(4) || !p.u32(count) || count > 51) return false;
+  for (uint32_t i=0; i<count; ++i) if (!p.spline()) return false;
+  return !p.left;
 }
-
-void reconnect_fun();  // forward decl
-
-// Tier 2: graceful close — send FIN to peer before close so they see EOF, not RST.
-inline void shutdown_close_tcp(int &sock)
-{
-  if (sock >= 0)
-  {
-    shutdown(sock, SHUT_RDWR);
-    close(sock);
-    sock = -1;
-  }
+template<class M> Bytes encode(const M &m, Kind kind, int sender) {
+  const uint32_t size = ros::serialization::serializationLength(m);
+  if (!size || size > MAX_TCP) return {};
+  Bytes b(HEADER + size);
+  std::memcpy(b.data(), "MSB2", 4);
+  uint32_t n = htonl(size); uint16_t k = htons(kind), s = htons(sender);
+  std::memcpy(b.data()+4,&n,4); std::memcpy(b.data()+8,&k,2); std::memcpy(b.data()+10,&s,2);
+  ros::serialization::OStream stream(b.data()+HEADER,size);
+  ros::serialization::serialize(stream,m);
+  return b;
 }
-
-int connect_to_next_drone(const char *ip, const int port)
-{
-  /* Connect */
-  int sock = 0;
-  struct sockaddr_in serv_addr;
-  if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
-  {
-    printf("\n Socket creation error \n");
-    return -1;
-  }
-
-  serv_addr.sin_family = AF_INET;
-  serv_addr.sin_port = htons(port);
-
-  // Convert IPv4 and IPv6 addresses from text to binary form
-  if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0)
-  {
-    printf("\nInvalid address/ Address not supported \n");
-    return -1;
-  }
-
-  if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
-  {
-    ROS_WARN("Tcp connection to drone_%d Failed", drone_id_+1);
-    return -1;
-  }
-
-  char str[INET_ADDRSTRLEN];
-  ROS_INFO("Connect to %s success!", inet_ntop(AF_INET, &serv_addr.sin_addr, str, sizeof(str)));
-  set_keepalive(sock);
-  publish_connection_state(true);
-
-  return sock;
+template<class M> bool decode(Bytes &b, uint16_t kind, M &m) {
+  if (!preflight(b,kind)) return false;
+  try {
+    ros::serialization::IStream stream(b.data(),b.size());
+    ros::serialization::deserialize(stream,m);
+    return stream.getLength() == 0;
+  } catch (const std::exception &) { return false; }
 }
-
-int init_broadcast(const char *ip, const int port)
-{
-  int fd;
-
-  if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) <= 0)
-  {
-    ROS_ERROR("[bridge_node]Socket sender creation error!");
-    exit(EXIT_FAILURE);
+bool valid(const traj_utils::Bspline &m, int id) {
+  if (m.drone_id != id || m.order != 3 || m.pos_pts.size() < size_t(m.order+1)
+      || m.knots.size() != m.pos_pts.size()+m.order+1 || m.start_time.isZero()
+      || !std::isfinite(m.yaw_dt) || m.yaw_dt < 0) return false;
+  double previous = -INFINITY;
+  for (double t : m.knots) {
+    if (!std::isfinite(t) || t <= previous) return false;
+    previous = t;
   }
-
-  int so_broadcast = 1;
-  if (setsockopt(fd, SOL_SOCKET, SO_BROADCAST, &so_broadcast, sizeof(so_broadcast)) < 0)
-  {
-    cout << "Error in setting Broadcast option";
-    exit(EXIT_FAILURE);
-  }
-
-  addr_udp_send_.sin_family = AF_INET;
-  addr_udp_send_.sin_port = htons(port);
-
-  if (inet_pton(AF_INET, ip, &addr_udp_send_.sin_addr) <= 0)
-  {
-    printf("\nInvalid address/ Address not supported \n");
-    return -1;
-  }
-
-  return fd;
+  if (m.knots[m.pos_pts.size()] <= std::max(0.0,m.knots[m.order])) return false;
+  for (const auto &p : m.pos_pts)
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return false;
+  for (double y : m.yaw_pts) if (!std::isfinite(y)) return false;
+  return true;
 }
-
-int wait_connection_from_previous_drone(const int port, int &server_fd, int &new_socket)
-{
-  struct sockaddr_in address;
-  int opt = 1;
-  int addrlen = sizeof(address);
-
-  // Creating socket file descriptor
-  if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-  {
-    perror("socket failed");
-    exit(EXIT_FAILURE);
-  }
-
-  // Forcefully attaching socket to the port
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
-                 &opt, sizeof(opt)))
-  {
-    perror("setsockopt");
-    exit(EXIT_FAILURE);
-  }
-  address.sin_family = AF_INET;
-  address.sin_addr.s_addr = INADDR_ANY;
-  address.sin_port = htons(PORT);
-
-  // Forcefully attaching socket to the port
-  if (bind(server_fd, (struct sockaddr *)&address,
-           sizeof(address)) < 0)
-  {
-    perror("bind failed");
-    exit(EXIT_FAILURE);
-  }
-  if (listen(server_fd, 3) < 0)
-  {
-    perror("listen");
-    exit(EXIT_FAILURE);
-  }
-  if ((new_socket = accept(server_fd, (struct sockaddr *)&address,
-                           (socklen_t *)&addrlen)) < 0)
-  {
-    perror("accept");
-    exit(EXIT_FAILURE);
-  }
-
-  set_keepalive(new_socket);
-  publish_connection_state(true);
-
-  char str[INET_ADDRSTRLEN];
-  ROS_INFO( "Receive tcp connection from %s", inet_ntop(AF_INET, &address.sin_addr, str, sizeof(str)) );
-
-  return new_socket;
+bool valid(const traj_utils::MultiBsplines &m, int sender) {
+  if (m.drone_id_from != sender || m.traj.size() != size_t(sender+1)) return false;
+  // The 1-based EGO chain reserves entry zero.
+  if (m.traj[0].drone_id != 0 || !m.traj[0].pos_pts.empty() || !m.traj[0].knots.empty()
+      || !m.traj[0].yaw_pts.empty()) return false;
+  for (int i=1; i<=sender; ++i) if (!valid(m.traj[i],i)) return false;
+  return true;
 }
-
-int udp_bind_to_port(const int port, int &server_fd)
-{
-  struct sockaddr_in address;
-  int opt = 1;
-
-  // Creating socket file descriptor
-  if ((server_fd = socket(AF_INET, SOCK_DGRAM, 0)) == 0)
-  {
-    perror("socket failed");
-    exit(EXIT_FAILURE);
-  }
-
-  // Forcefully attaching socket to the port
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT,
-                 &opt, sizeof(opt)))
-  {
-    perror("setsockopt");
-    exit(EXIT_FAILURE);
-  }
-  address.sin_family = AF_INET;
-  address.sin_addr.s_addr = INADDR_ANY;
-  address.sin_port = htons(port);
-
-  // Forcefully attaching socket to the port
-  if (bind(server_fd, (struct sockaddr *)&address,
-           sizeof(address)) < 0)
-  {
-    perror("bind failed");
-    exit(EXIT_FAILURE);
-  }
-
-  return server_fd;
+void closeFd(int &fd) {
+  if (fd >= 0) { ::shutdown(fd,SHUT_RDWR); ::close(fd); fd = -1; }
 }
-
-int serializeMultiBsplines(const traj_utils::MultiBsplinesPtr &msg)
-{
-  char *ptr = send_buf_;
-
-  unsigned long total_len = 0;
-  total_len += sizeof(MESSAGE_TYPE) + sizeof(int32_t) + sizeof(size_t);
-  for (size_t i = 0; i < msg->traj.size(); i++)
-  {
-    total_len += sizeof(int32_t) + sizeof(int32_t) + sizeof(double) + sizeof(int64_t) + sizeof(double);
-    total_len += sizeof(size_t) + msg->traj[i].knots.size() * sizeof(double);
-    total_len += sizeof(size_t) + (3 * msg->traj[i].pos_pts.size()) * sizeof(double);
-    total_len += sizeof(size_t) + msg->traj[i].yaw_pts.size() * sizeof(double);
-  }
-  if (total_len + 1 > BUF_LEN)
-  {
-    ROS_ERROR("[bridge_node] Topic is too large, please enlarge BUF_LEN");
-    return -1;
-  }
-
-  *((MESSAGE_TYPE *)ptr) = MESSAGE_TYPE::MULTI_TRAJ;
-  ptr += sizeof(MESSAGE_TYPE);
-
-  *((int32_t *)ptr) = msg->drone_id_from;
-  ptr += sizeof(int32_t);
-  if (ptr - send_buf_ > BUF_LEN)
-  {
-  }
-  *((size_t *)ptr) = msg->traj.size();
-  ptr += sizeof(size_t);
-  for (size_t i = 0; i < msg->traj.size(); i++)
-  {
-    *((int32_t *)ptr) = msg->traj[i].drone_id;
-    ptr += sizeof(int32_t);
-    *((int32_t *)ptr) = msg->traj[i].order;
-    ptr += sizeof(int32_t);
-    *((double *)ptr) = msg->traj[i].start_time.toSec();
-    ptr += sizeof(double);
-    *((int64_t *)ptr) = msg->traj[i].traj_id;
-    ptr += sizeof(int64_t);
-    *((double *)ptr) = msg->traj[i].yaw_dt;
-    ptr += sizeof(double);
-
-    *((size_t *)ptr) = msg->traj[i].knots.size();
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].knots.size(); j++)
-    {
-      *((double *)ptr) = msg->traj[i].knots[j];
-      ptr += sizeof(double);
-    }
-
-    *((size_t *)ptr) = msg->traj[i].pos_pts.size();
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].pos_pts.size(); j++)
-    {
-      *((double *)ptr) = msg->traj[i].pos_pts[j].x;
-      ptr += sizeof(double);
-      *((double *)ptr) = msg->traj[i].pos_pts[j].y;
-      ptr += sizeof(double);
-      *((double *)ptr) = msg->traj[i].pos_pts[j].z;
-      ptr += sizeof(double);
-    }
-
-    *((size_t *)ptr) = msg->traj[i].yaw_pts.size();
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].yaw_pts.size(); j++)
-    {
-      *((double *)ptr) = msg->traj[i].yaw_pts[j];
-      ptr += sizeof(double);
-    }
-  }
-
-  return ptr - send_buf_;
+void nonblock(int fd) { fcntl(fd,F_SETFL,fcntl(fd,F_GETFL,0)|O_NONBLOCK); }
+bool ready(int fd, short events, int ms=100) {
+  pollfd p{fd,events,0};
+  return poll(&p,1,ms)>0 && (p.revents & events);
 }
-
-int serializeOdom(const nav_msgs::OdometryPtr &msg)
-{
-  char *ptr = udp_send_buf_;
-
-  unsigned long total_len = 0;
-  total_len = sizeof(size_t) +
-              msg->child_frame_id.length() * sizeof(char) +
-              sizeof(size_t) +
-              msg->header.frame_id.length() * sizeof(char) +
-              sizeof(uint32_t) +
-              sizeof(double) +
-              7 * sizeof(double) +
-              36 * sizeof(double) +
-              6 * sizeof(double) +
-              36 * sizeof(double);
-
-  if (total_len + 1 > BUF_LEN)
-  {
-    ROS_ERROR("[bridge_node] Topic is too large, please enlarge BUF_LEN");
-    return -1;
-  }
-
-  *((MESSAGE_TYPE *)ptr) = MESSAGE_TYPE::ODOM;
-  ptr += sizeof(MESSAGE_TYPE);
-
-  // child_frame_id
-  size_t len = msg->child_frame_id.length();
-  *((size_t *)ptr) = len;
-  ptr += sizeof(size_t);
-  memcpy((void *)ptr, (void *)msg->child_frame_id.c_str(), len * sizeof(char));
-  ptr += len * sizeof(char);
-
-  // header
-  len = msg->header.frame_id.length();
-  *((size_t *)ptr) = len;
-  ptr += sizeof(size_t);
-  memcpy((void *)ptr, (void *)msg->header.frame_id.c_str(), len * sizeof(char));
-  ptr += len * sizeof(char);
-  *((uint32_t *)ptr) = msg->header.seq;
-  ptr += sizeof(uint32_t);
-  *((double *)ptr) = msg->header.stamp.toSec();
-  ptr += sizeof(double);
-
-  *((double *)ptr) = msg->pose.pose.position.x;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->pose.pose.position.y;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->pose.pose.position.z;
-  ptr += sizeof(double);
-
-  *((double *)ptr) = msg->pose.pose.orientation.w;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->pose.pose.orientation.x;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->pose.pose.orientation.y;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->pose.pose.orientation.z;
-  ptr += sizeof(double);
-
-  for (size_t j = 0; j < 36; j++)
-  {
-    *((double *)ptr) = msg->pose.covariance[j];
-    ptr += sizeof(double);
-  }
-
-  *((double *)ptr) = msg->twist.twist.linear.x;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->twist.twist.linear.y;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->twist.twist.linear.z;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->twist.twist.angular.x;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->twist.twist.angular.y;
-  ptr += sizeof(double);
-  *((double *)ptr) = msg->twist.twist.angular.z;
-  ptr += sizeof(double);
-
-  for (size_t j = 0; j < 36; j++)
-  {
-    *((double *)ptr) = msg->twist.covariance[j];
-    ptr += sizeof(double);
-  }
-
-  return ptr - udp_send_buf_;
+sockaddr_in address(const std::string &ip, int port) {
+  sockaddr_in a{}; a.sin_family=AF_INET; a.sin_port=htons(port);
+  if (port < 1 || port > 65535 || inet_pton(AF_INET,ip.c_str(),&a.sin_addr)!=1)
+    throw std::runtime_error("invalid IPv4 address or port");
+  return a;
 }
-
-int serializeStop(const std_msgs::EmptyPtr &msg)
-{
-  char *ptr = udp_send_buf_;
-
-  *((MESSAGE_TYPE *)ptr) = MESSAGE_TYPE::STOP;
-  ptr += sizeof(MESSAGE_TYPE);
-
-  return ptr - udp_send_buf_;
+int boundSocket(int type, const sockaddr_in &a) {
+  int fd=socket(AF_INET,type,0);
+  if (fd<0) throw std::runtime_error("socket creation failed");
+  int one=1;
+  if (type==SOCK_STREAM) setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&one,sizeof(one));
+  else setsockopt(fd,SOL_SOCKET,SO_BROADCAST,&one,sizeof(one));
+  if (bind(fd,reinterpret_cast<const sockaddr*>(&a),sizeof(a))<0) {
+    closeFd(fd); throw std::runtime_error("bind failed; check duplicate bridge/port ownership");
+  }
+  nonblock(fd); return fd;
 }
-
-int serializeOneTraj(const traj_utils::BsplinePtr &msg)
-{
-  char *ptr = udp_send_buf_;
-
-  unsigned long total_len = 0;
-  total_len += sizeof(int32_t) + sizeof(int32_t) + sizeof(double) + sizeof(int64_t) + sizeof(double);
-  total_len += sizeof(size_t) + msg->knots.size() * sizeof(double);
-  total_len += sizeof(size_t) + (3 * msg->pos_pts.size()) * sizeof(double);
-  total_len += sizeof(size_t) + msg->yaw_pts.size() * sizeof(double);
-  if (total_len + 1 > BUF_LEN)
-  {
-    ROS_ERROR("[bridge_node] Topic is too large, please enlarge BUF_LEN (2)");
-    return -1;
-  }
-
-  *((MESSAGE_TYPE *)ptr) = MESSAGE_TYPE::ONE_TRAJ;
-  ptr += sizeof(MESSAGE_TYPE);
-
-  *((int32_t *)ptr) = msg->drone_id;
-  ptr += sizeof(int32_t);
-  *((int32_t *)ptr) = msg->order;
-  ptr += sizeof(int32_t);
-  *((double *)ptr) = msg->start_time.toSec();
-  ptr += sizeof(double);
-  *((int64_t *)ptr) = msg->traj_id;
-  ptr += sizeof(int64_t);
-  *((double *)ptr) = msg->yaw_dt;
-  ptr += sizeof(double);
-
-  *((size_t *)ptr) = msg->knots.size();
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->knots.size(); j++)
-  {
-    *((double *)ptr) = msg->knots[j];
-    ptr += sizeof(double);
-  }
-
-  *((size_t *)ptr) = msg->pos_pts.size();
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->pos_pts.size(); j++)
-  {
-    *((double *)ptr) = msg->pos_pts[j].x;
-    ptr += sizeof(double);
-    *((double *)ptr) = msg->pos_pts[j].y;
-    ptr += sizeof(double);
-    *((double *)ptr) = msg->pos_pts[j].z;
-    ptr += sizeof(double);
-  }
-
-  *((size_t *)ptr) = msg->yaw_pts.size();
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->yaw_pts.size(); j++)
-  {
-    *((double *)ptr) = msg->yaw_pts[j];
-    ptr += sizeof(double);
-  }
-
-  return ptr - udp_send_buf_;
+void keepalive(int fd) {
+  int one=1, idle=5, interval=3, count=2;
+  setsockopt(fd,SOL_SOCKET,SO_KEEPALIVE,&one,sizeof(one));
+  setsockopt(fd,IPPROTO_TCP,TCP_KEEPIDLE,&idle,sizeof(idle));
+  setsockopt(fd,IPPROTO_TCP,TCP_KEEPINTVL,&interval,sizeof(interval));
+  setsockopt(fd,IPPROTO_TCP,TCP_KEEPCNT,&count,sizeof(count));
 }
+} // namespace
 
-int deserializeOneTraj(traj_utils::BsplinePtr &msg)
-{
-  char *ptr = udp_recv_buf_;
+class Bridge {
+  ros::NodeHandle nh_{"~"};
+  int id_, count_, tcp_port_, peer_port_, udp_port_, udp_peer_port_;
+  std::string peer_ip_, udp_ip_, bind_ip_, ns_;
+  int listener_=-1, udp_=-1, tx_=-1;
+  sockaddr_in peer_{}, udp_peer_{};
+  std::atomic<bool> alive_{true}, tx_up_{false}, rx_up_{false};
+  std::mutex tx_mutex_;
+  std::thread receiver_, sender_, udp_receiver_;
+  ros::Publisher multi_rx_, single_rx_, state_, request_current_;
+  ros::Subscriber multi_tx_, single_tx_;
+  ros::WallTimer timer_;
+  using Key=std::tuple<int,int64_t,uint64_t>;
+  std::set<Key> seen_;
+  std::deque<Key> seen_order_;
 
-  ptr += sizeof(MESSAGE_TYPE);
-
-  msg->drone_id = *((int32_t *)ptr);
-  ptr += sizeof(int32_t);
-  msg->order = *((int32_t *)ptr);
-  ptr += sizeof(int32_t);
-  msg->start_time.fromSec(*((double *)ptr));
-  ptr += sizeof(double);
-  msg->traj_id = *((int64_t *)ptr);
-  ptr += sizeof(int64_t);
-  msg->yaw_dt = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->knots.resize(*((size_t *)ptr));
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->knots.size(); j++)
-  {
-    msg->knots[j] = *((double *)ptr);
-    ptr += sizeof(double);
+  bool running() const { return alive_ && ros::ok(); }
+  bool connected() const {
+    return (id_==count_ || tx_up_) && (id_==1 || rx_up_);
   }
-
-  msg->pos_pts.resize(*((size_t *)ptr));
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->pos_pts.size(); j++)
-  {
-    msg->pos_pts[j].x = *((double *)ptr);
-    ptr += sizeof(double);
-    msg->pos_pts[j].y = *((double *)ptr);
-    ptr += sizeof(double);
-    msg->pos_pts[j].z = *((double *)ptr);
-    ptr += sizeof(double);
+  void publishState() {
+    std_msgs::Bool m; m.data=connected(); state_.publish(m);
+    // Repeat across ROS discovery and peer/planner restarts. Ask the owner to
+    // rebuild its current chain; never replay a cached startup trajectory.
+    if (id_<count_ && tx_up_) request_current_.publish(std_msgs::Empty());
   }
-
-  msg->yaw_pts.resize(*((size_t *)ptr));
-  ptr += sizeof(size_t);
-  for (size_t j = 0; j < msg->yaw_pts.size(); j++)
-  {
-    msg->yaw_pts[j] = *((double *)ptr);
-    ptr += sizeof(double);
+  int connectPeer() {
+    int fd=socket(AF_INET,SOCK_STREAM,0);
+    if (fd<0) return -1;
+    nonblock(fd);
+    int rc=connect(fd,reinterpret_cast<const sockaddr*>(&peer_),sizeof(peer_));
+    if (rc<0 && (errno!=EINPROGRESS || !ready(fd,POLLOUT,300))) { closeFd(fd); return -1; }
+    int error=0; socklen_t len=sizeof(error);
+    if (getsockopt(fd,SOL_SOCKET,SO_ERROR,&error,&len)<0 || error) { closeFd(fd); return -1; }
+    keepalive(fd); return fd;
   }
-
-  return ptr - udp_recv_buf_;
-}
-
-int deserializeStop(std_msgs::EmptyPtr &msg)
-{
-  char *ptr = udp_recv_buf_;
-
-  return ptr - udp_recv_buf_;
-}
-
-int deserializeOdom(nav_msgs::OdometryPtr &msg)
-{
-  char *ptr = udp_recv_buf_;
-
-  ptr += sizeof(MESSAGE_TYPE);
-
-  // child_frame_id
-  size_t len = *((size_t *)ptr);
-  ptr += sizeof(size_t);
-  msg->child_frame_id.assign((const char *)ptr, len);
-  ptr += len * sizeof(char);
-
-  // header
-  len = *((size_t *)ptr);
-  ptr += sizeof(size_t);
-  msg->header.frame_id.assign((const char *)ptr, len);
-  ptr += len * sizeof(char);
-  msg->header.seq = *((uint32_t *)ptr);
-  ptr += sizeof(uint32_t);
-  msg->header.stamp.fromSec(*((double *)ptr));
-  ptr += sizeof(double);
-
-  msg->pose.pose.position.x = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->pose.pose.position.y = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->pose.pose.position.z = *((double *)ptr);
-  ptr += sizeof(double);
-
-  msg->pose.pose.orientation.w = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->pose.pose.orientation.x = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->pose.pose.orientation.y = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->pose.pose.orientation.z = *((double *)ptr);
-  ptr += sizeof(double);
-
-  for (size_t j = 0; j < 36; j++)
-  {
-    msg->pose.covariance[j] = *((double *)ptr);
-    ptr += sizeof(double);
-  }
-
-  msg->twist.twist.linear.x = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->twist.twist.linear.y = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->twist.twist.linear.z = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->twist.twist.angular.x = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->twist.twist.angular.y = *((double *)ptr);
-  ptr += sizeof(double);
-  msg->twist.twist.angular.z = *((double *)ptr);
-  ptr += sizeof(double);
-
-  for (size_t j = 0; j < 36; j++)
-  {
-    msg->twist.covariance[j] = *((double *)ptr);
-    ptr += sizeof(double);
-  }
-
-  return ptr - udp_recv_buf_;
-}
-
-int deserializeMultiBsplines(traj_utils::MultiBsplinesPtr &msg)
-{
-  char *ptr = recv_buf_;
-
-  ptr += sizeof(MESSAGE_TYPE);
-
-  msg->drone_id_from = *((int32_t *)ptr);
-  ptr += sizeof(int32_t);
-  msg->traj.resize(*((size_t *)ptr));
-  ptr += sizeof(size_t);
-  for (size_t i = 0; i < msg->traj.size(); i++)
-  {
-    msg->traj[i].drone_id = *((int32_t *)ptr);
-    ptr += sizeof(int32_t);
-    msg->traj[i].order = *((int32_t *)ptr);
-    ptr += sizeof(int32_t);
-    msg->traj[i].start_time.fromSec(*((double *)ptr));
-    ptr += sizeof(double);
-    msg->traj[i].traj_id = *((int64_t *)ptr);
-    ptr += sizeof(int64_t);
-    msg->traj[i].yaw_dt = *((double *)ptr);
-    ptr += sizeof(double);
-
-    msg->traj[i].knots.resize(*((size_t *)ptr));
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].knots.size(); j++)
-    {
-      msg->traj[i].knots[j] = *((double *)ptr);
-      ptr += sizeof(double);
-    }
-
-    msg->traj[i].pos_pts.resize(*((size_t *)ptr));
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].pos_pts.size(); j++)
-    {
-      msg->traj[i].pos_pts[j].x = *((double *)ptr);
-      ptr += sizeof(double);
-      msg->traj[i].pos_pts[j].y = *((double *)ptr);
-      ptr += sizeof(double);
-      msg->traj[i].pos_pts[j].z = *((double *)ptr);
-      ptr += sizeof(double);
-    }
-
-    msg->traj[i].yaw_pts.resize(*((size_t *)ptr));
-    ptr += sizeof(size_t);
-    for (size_t j = 0; j < msg->traj[i].yaw_pts.size(); j++)
-    {
-      msg->traj[i].yaw_pts[j] = *((double *)ptr);
-      ptr += sizeof(double);
-    }
-  }
-
-  return ptr - recv_buf_;
-}
-
-void multitraj_sub_tcp_cb(const traj_utils::MultiBsplinesPtr &msg)
-{
-  int len = serializeMultiBsplines(msg);
-  std::lock_guard<std::mutex> lk(tcp_send_mtx_);
-  if (send_sock_ < 0) return;  // reconnect_fun owns the socket; just drop this frame
-
-  if (send(send_sock_, send_buf_, len, 0) <= 0)
-  {
-    ROS_WARN("[bridge_node] TCP send failed");
-    close(send_sock_);
-    send_sock_ = -1;
-    publish_connection_state(false);  // reconnect_fun will retry with backoff
-  }
-}
-
-void odom_sub_udp_cb(const nav_msgs::OdometryPtr &msg)
-{
-
-  static ros::Time t_last;
-  ros::Time t_now = ros::Time::now();
-  if ((t_now - t_last).toSec() * odom_broadcast_freq_ < 1.0)
-  {
-    return;
-  }
-  t_last = t_now;
-
-  msg->child_frame_id = string("drone_") + std::to_string(drone_id_);
-
-  int len = serializeOdom(msg);
-
-  if (sendto(udp_send_fd_, udp_send_buf_, len, 0, (struct sockaddr *)&addr_udp_send_, sizeof(addr_udp_send_)) <= 0)
-  {
-    ROS_ERROR("UDP SEND ERROR (1)!!!");
-  }
-}
-
-void emergency_stop_sub_udp_cb(const std_msgs::EmptyPtr &msg)
-{
-
-  int len = serializeStop(msg);
-
-  if (sendto(udp_send_fd_, udp_send_buf_, len, 0, (struct sockaddr *)&addr_udp_send_, sizeof(addr_udp_send_)) <= 0)
-  {
-    ROS_ERROR("UDP SEND ERROR (2)!!!");
-  }
-}
-
-void one_traj_sub_udp_cb(const traj_utils::BsplinePtr &msg)
-{
-
-  int len = serializeOneTraj(msg);
-
-  if (sendto(udp_send_fd_, udp_send_buf_, len, 0, (struct sockaddr *)&addr_udp_send_, sizeof(addr_udp_send_)) <= 0)
-  {
-    ROS_ERROR("UDP SEND ERROR (3)!!!");
-  }
-}
-
-void server_fun()
-{
-  while (ros::ok())
-  {
-    // accept with retry — survives both startup race and peer reconnect
-    while (ros::ok() &&
-           wait_connection_from_previous_drone(PORT, server_fd_, recv_sock_) < 0)
-    {
-      ROS_WARN("[bridge_node] TCP accept failed, retry in 1s");
-      ros::Duration(1.0).sleep();
-    }
-    if (!ros::ok()) break;
-
-    // read until peer disconnects or node shuts down
-    int valread;
-    while (ros::ok() && (valread = read(recv_sock_, recv_buf_, BUF_LEN)) > 0)
-    {
-      if (valread == deserializeMultiBsplines(bsplines_msg_))
+  void senderLoop() {
+    while (running()) {
       {
-        if (swarm_trajs_pub_)
-          swarm_trajs_pub_.publish(*bsplines_msg_);
-      }
-      else
-      {
-        ROS_ERROR("Received message length not matches the sent one!!!");
-      }
-    }
-    ROS_WARN("[bridge_node] TCP disconnected, will re-accept");
-    publish_connection_state(false);
-    shutdown_close_tcp(recv_sock_);
-    shutdown_close_tcp(server_fd_);
-  }
-
-  shutdown_close_tcp(recv_sock_);
-  shutdown_close_tcp(server_fd_);
-}
-
-void udp_recv_fun()
-{
-  int valread;
-  struct sockaddr_in addr_client;
-  socklen_t addr_len;
-
-  // Connect
-  if (udp_bind_to_port(UDP_PORT, udp_server_fd_) < 0)
-  {
-    ROS_ERROR("[bridge_node]Socket recever creation error!");
-    exit(EXIT_FAILURE);
-  }
-
-  while (true)
-  {
-    if ((valread = recvfrom(udp_server_fd_, udp_recv_buf_, BUF_LEN, 0, (struct sockaddr *)&addr_client, (socklen_t *)&addr_len)) < 0)
-    {
-      perror("recvfrom error:");
-      exit(EXIT_FAILURE);
-    }
-
-    char *ptr = udp_recv_buf_;
-    switch (*((MESSAGE_TYPE *)ptr))
-    {
-    case MESSAGE_TYPE::STOP:
-    {
-
-      if (valread == sizeof(std_msgs::Empty))
-      {
-        if (valread == deserializeStop(stop_msg_))
-        {
-          emergency_stop_pub_.publish(*stop_msg_);
-        }
-        else
-        {
-          ROS_ERROR("Received message length not matches the sent one (1)!!!");
-          continue;
+        std::lock_guard<std::mutex> lock(tx_mutex_);
+        if (tx_>=0) {
+          char c;
+          int n=recv(tx_,&c,1,MSG_PEEK|MSG_DONTWAIT);
+          if (n==0 || (n<0 && errno!=EAGAIN && errno!=EWOULDBLOCK && errno!=EINTR)) {
+            closeFd(tx_); tx_up_=false;
+          }
         }
       }
-
-      break;
-    }
-
-    case MESSAGE_TYPE::ODOM:
-    {
-      if (valread == deserializeOdom(odom_msg_))
-      {
-        other_odoms_pub_.publish(*odom_msg_);
+      if (!tx_up_) {
+        int fd=connectPeer();
+        if (fd>=0) {
+          std::lock_guard<std::mutex> lock(tx_mutex_);
+          tx_=fd; tx_up_=true;
+        }
       }
-      else
-      {
-        ROS_ERROR("Received message length not matches the sent one (2)!!!");
-        continue;
-      }
-
-      break;
-    }
-
-    case MESSAGE_TYPE::ONE_TRAJ:
-    {
-
-      if ( valread == deserializeOneTraj(bspline_msg_) )
-      {
-        one_traj_pub_.publish(*bspline_msg_);
-      }
-      else
-      {
-        ROS_ERROR("Received message length not matches the sent one (3)!!!");
-        continue;
-      }
-
-      break;
-    }
-
-    default:
-
-      //ROS_ERROR("Unknown received message???");
-
-      break;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
   }
-}
-
-// Tier 1: own the TCP send socket, reconnect with exponential backoff.
-// Runs in background so ROS callbacks never sit on a stuck OS-level connect().
-void reconnect_fun()
-{
-  while (ros::ok())
-  {
-    bool need_reconnect;
-    {
-      std::lock_guard<std::mutex> lk(tcp_send_mtx_);
-      need_reconnect = (send_sock_ < 0);
+  void sendMulti(const traj_utils::MultiBsplines::ConstPtr &m) {
+    if (!valid(*m,id_)) { ROS_WARN_THROTTLE(2,"Reject invalid/nonlocal multi trajectory"); return; }
+    Bytes b=encode(*m,MULTI,id_);
+    if (b.empty()) return;
+    std::lock_guard<std::mutex> lock(tx_mutex_);
+    if (tx_<0) return; // Never replay a queued trajectory after reconnect.
+    size_t sent=0;
+    auto end=Clock::now()+std::chrono::milliseconds(200);
+    while (sent<b.size() && running() && Clock::now()<end) {
+      ssize_t n=send(tx_,b.data()+sent,b.size()-sent,MSG_NOSIGNAL);
+      if (n>0) sent+=size_t(n);
+      else if (n<0 && errno==EINTR) continue;
+      else if (n<0 && (errno==EAGAIN || errno==EWOULDBLOCK)) ready(tx_,POLLOUT,20);
+      else break;
     }
-    if (!need_reconnect)
-    {
-      ros::Duration(0.5).sleep();
-      continue;
+    if (sent!=b.size()) { closeFd(tx_); tx_up_=false; }
+  }
+  void sendSingle(const traj_utils::Bspline::ConstPtr &m) {
+    if (!valid(*m,id_)) { ROS_WARN_THROTTLE(2,"Reject invalid/nonlocal UDP trajectory"); return; }
+    Bytes b=encode(*m,SINGLE,id_);
+    if (b.size()>MAX_UDP || b.empty()) { ROS_WARN_THROTTLE(2,"UDP trajectory exceeds packet budget"); return; }
+    if (sendto(udp_,b.data(),b.size(),0,reinterpret_cast<const sockaddr*>(&udp_peer_),sizeof(udp_peer_))
+        != ssize_t(b.size())) ROS_WARN_THROTTLE(2,"UDP trajectory send failed");
+  }
+  bool consume(Bytes &pending) {
+    size_t offset=0;
+    while (pending.size()-offset>=HEADER) {
+      Header h;
+      if (!header(pending.data()+offset,h) || h.kind!=MULTI || h.sender!=id_-1) return false;
+      if (pending.size()-offset<HEADER+h.length) break;
+      Bytes payload(pending.begin()+offset+HEADER,pending.begin()+offset+HEADER+h.length);
+      traj_utils::MultiBsplines m;
+      if (!decode(payload,MULTI,m) || !valid(m,h.sender)) return false;
+      multi_rx_.publish(m);
+      offset+=HEADER+h.length;
     }
-    int new_sock = connect_to_next_drone(tcp_ip_.c_str(), PORT);
-    if (new_sock >= 0)
-    {
-      std::lock_guard<std::mutex> lk(tcp_send_mtx_);
-      send_sock_ = new_sock;
-      reconnect_backoff_sec_ = 1.0;
-      // set_keepalive + publish_connection_state(true) already called inside connect_to_next_drone
-    }
-    else
-    {
-      ros::Duration(reconnect_backoff_sec_).sleep();
-      reconnect_backoff_sec_ = std::min(reconnect_backoff_sec_ * 2, RECONNECT_BACKOFF_MAX);
+    if (offset) pending.erase(pending.begin(),pending.begin()+offset);
+    return true;
+  }
+  void receiverLoop() {
+    while (running()) {
+      if (!ready(listener_,POLLIN)) continue;
+      int fd=accept(listener_,nullptr,nullptr);
+      if (fd<0) continue;
+      nonblock(fd); keepalive(fd); rx_up_=true;
+      Bytes pending; pending.reserve(8192);
+      auto frame_start=Clock::now();
+      while (running()) {
+        if (!pending.empty() && Clock::now()-frame_start>std::chrono::seconds(2)) break;
+        if (!ready(fd,POLLIN)) continue;
+        uint8_t chunk[8192]; ssize_t n=recv(fd,chunk,sizeof(chunk),0);
+        if (n==0) break;
+        if (n<0) { if (errno==EINTR || errno==EAGAIN || errno==EWOULDBLOCK) continue; break; }
+        if (pending.empty()) frame_start=Clock::now();
+        pending.insert(pending.end(),chunk,chunk+n);
+        const auto before=pending.size();
+        if (!consume(pending)) { ROS_WARN("Rejected invalid/version-mismatched TCP frame"); break; }
+        if (pending.size()<before) frame_start=Clock::now();
+        if (pending.size()>HEADER+MAX_TCP) break;
+      }
+      rx_up_=false; closeFd(fd);
     }
   }
-}
-
-int main(int argc, char **argv)
-{
-  ros::init(argc, argv, "rosmsg_tcp_bridge");
-  ros::NodeHandle nh("~");
-
-  nh.param("next_drone_ip", tcp_ip_, string("127.0.0.1"));
-  nh.param("broadcast_ip", udp_ip_, string("127.0.0.255"));
-  nh.param("drone_id", drone_id_, -1);
-  nh.param("odom_max_freq", odom_broadcast_freq_, 1000.0);
-
-  bsplines_msg_.reset(new traj_utils::MultiBsplines);
-  odom_msg_.reset(new nav_msgs::Odometry);
-  stop_msg_.reset(new std_msgs::Empty);
-  bspline_msg_.reset(new traj_utils::Bspline);
-
-  if (drone_id_ == -1)
-  {
-    ROS_ERROR("Wrong drone_id!");
-    exit(EXIT_FAILURE);
+  void udpLoop() {
+    Bytes bytes(MAX_UDP+1);
+    while (running()) {
+      if (!ready(udp_,POLLIN)) continue;
+      ssize_t n=recv(udp_,bytes.data(),bytes.size(),0);
+      if (n<ssize_t(HEADER) || n>ssize_t(MAX_UDP)) continue;
+      Header h;
+      if (!header(bytes.data(),h) || h.kind!=SINGLE || HEADER+h.length!=size_t(n)
+          || h.sender<1 || h.sender>count_ || h.sender==id_) continue;
+      Bytes payload(bytes.begin()+HEADER,bytes.begin()+n);
+      traj_utils::Bspline m;
+      if (!decode(payload,SINGLE,m) || !valid(m,h.sender)) continue;
+      // Trajectories are immutable for (sender, trajectory ID, start time).
+      Key k{h.sender,m.traj_id,m.start_time.toNSec()};
+      if (!seen_.insert(k).second) continue;
+      seen_order_.push_back(k);
+      if (seen_order_.size()>256) { seen_.erase(seen_order_.front()); seen_order_.pop_front(); }
+      single_rx_.publish(m); // Preserve the original trajectory time, never stamp now.
+    }
   }
-
-  string sub_traj_topic_name = string("/uav") + std::to_string(drone_id_) + string("/planning/swarm_trajs");
-  swarm_trajs_sub_ = nh.subscribe(sub_traj_topic_name.c_str(), 10, multitraj_sub_tcp_cb, ros::TransportHints().tcpNoDelay());
-
-  if ( drone_id_ >= 2 )
-  {
-    string pub_traj_topic_name = string("/uav") + std::to_string(drone_id_ - 1) + string("/planning/swarm_trajs");
-    swarm_trajs_pub_ = nh.advertise<traj_utils::MultiBsplines>(pub_traj_topic_name.c_str(), 10);
+public:
+  Bridge() {
+    nh_.param("drone_id",id_,1); nh_.param("swarm_num",count_,2);
+    nh_.param("tcp_port",tcp_port_,8080); nh_.param("tcp_peer_port",peer_port_,8080);
+    nh_.param("udp_port",udp_port_,8081); nh_.param("udp_peer_port",udp_peer_port_,8081);
+    nh_.param<std::string>("next_drone_ip",peer_ip_,"127.0.0.1");
+    nh_.param<std::string>("broadcast_ip",udp_ip_,"192.168.1.255");
+    nh_.param<std::string>("bind_ip",bind_ip_,"0.0.0.0");
+    if (id_<1 || count_<id_ || count_>50) throw std::runtime_error("IDs must be 1..swarm_num, maximum 50");
+    ns_="/uav"+std::to_string(id_)+"/bridge/";
+    peer_=address(peer_ip_,peer_port_); udp_peer_=address(udp_ip_,udp_peer_port_);
+    single_rx_=nh_.advertise<traj_utils::Bspline>(ns_+"rx/bspline",100);
+    if (id_<count_) request_current_=nh_.advertise<std_msgs::Empty>(ns_+"request_current",1);
+    state_=nh_.advertise<std_msgs::Bool>("/uav"+std::to_string(id_)+"/bridge_connection_state",1,true);
+    state_.publish(std_msgs::Bool());
+    try {
+      udp_=boundSocket(SOCK_DGRAM,address(bind_ip_,udp_port_));
+      if (id_>1) {
+        listener_=boundSocket(SOCK_STREAM,address(bind_ip_,tcp_port_));
+        if (listen(listener_,2)<0) throw std::runtime_error("TCP listen failed");
+        multi_rx_=nh_.advertise<traj_utils::MultiBsplines>(ns_+"rx/prev_multi_traj",10);
+      }
+    } catch (...) { closeFd(udp_); closeFd(listener_); throw; }
+    single_tx_=nh_.subscribe(ns_+"tx/bspline",100,&Bridge::sendSingle,this,ros::TransportHints().tcpNoDelay());
+    if (id_<count_)
+      multi_tx_=nh_.subscribe(ns_+"tx/multi_traj",10,&Bridge::sendMulti,this,ros::TransportHints().tcpNoDelay());
+    timer_=nh_.createWallTimer(ros::WallDuration(.5),[this](const ros::WallTimerEvent&){publishState();});
+    udp_receiver_=std::thread(&Bridge::udpLoop,this);
+    if (id_>1) receiver_=std::thread(&Bridge::receiverLoop,this);
+    if (id_<count_) sender_=std::thread(&Bridge::senderLoop,this);
+    ROS_INFO("MSB2 bridge uav%d/%d; separate TX/RX; TCP chain and UDP peer exchange",id_,count_);
   }
+  ~Bridge() {
+    alive_=false;
+    if (sender_.joinable()) sender_.join();
+    if (receiver_.joinable()) receiver_.join();
+    if (udp_receiver_.joinable()) udp_receiver_.join();
+    closeFd(tx_); closeFd(listener_); closeFd(udp_);
+  }
+};
 
-  // other_odoms_sub_ = nh.subscribe("my_odom", 10, odom_sub_udp_cb, ros::TransportHints().tcpNoDelay());
-  // other_odoms_pub_ = nh.advertise<nav_msgs::Odometry>("/others_odom", 10);
-
-  //emergency_stop_sub_ = nh.subscribe("emergency_stop_broadcast", 10, emergency_stop_sub_udp_cb, ros::TransportHints().tcpNoDelay());
-  //emergency_stop_pub_ = nh.advertise<std_msgs::Empty>("emergency_stop_recv", 10);
-
-  one_traj_sub_ = nh.subscribe("/broadcast_bspline", 100, one_traj_sub_udp_cb, ros::TransportHints().tcpNoDelay());
-  one_traj_pub_ = nh.advertise<traj_utils::Bspline>("/broadcast_bspline2", 100);
-
-  // Tier 1: /uav{X}/bridge_connection_state
-  connection_state_pub_ = nh.advertise<std_msgs::Bool>(
-      "/uav" + std::to_string(drone_id_) + "/bridge_connection_state", 10);
-  publish_connection_state(false);
-
-  boost::thread recv_thd(server_fun);
-  recv_thd.detach();
-  ros::Duration(0.1).sleep();
-  boost::thread udp_recv_thd(udp_recv_fun);
-  udp_recv_thd.detach();
-  ros::Duration(0.1).sleep();
-  boost::thread reconnect_thd(reconnect_fun);
-  reconnect_thd.detach();
-
-  // TCP connect
-  send_sock_ = connect_to_next_drone(tcp_ip_.c_str(), PORT);
-
-  // UDP connect
-  udp_send_fd_ = init_broadcast(udp_ip_.c_str(), UDP_PORT);
-
-  cout << "[rosmsg_tcp_bridge] start running" << endl;
-
-  ros::spin();
-
-  shutdown_close_tcp(send_sock_);
-  shutdown_close_tcp(recv_sock_);
-  shutdown_close_tcp(server_fd_);
-  if (udp_server_fd_ >= 0) { close(udp_server_fd_); udp_server_fd_ = -1; }
-  if (udp_send_fd_ >= 0) { close(udp_send_fd_); udp_send_fd_ = -1; }
-
+int main(int argc,char **argv) {
+  ros::init(argc,argv,"rosmsg_tcp_bridge");
+  try { Bridge bridge; ros::spin(); }
+  catch (const std::exception &e) { ROS_FATAL("bridge: %s",e.what()); return 1; }
   return 0;
 }

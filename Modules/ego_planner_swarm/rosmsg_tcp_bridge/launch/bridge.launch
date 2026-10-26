@@ -1,15 +1,22 @@
 <launch>
-
-  <arg name="uav_id" default="1" />
-  <arg name="next_drone_ip" default="127.0.0.1" />
-  <arg name="broadcast_ip" default="192.168.1.255" />
-
-  <!-- <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen" launch-prefix="valgrind" > -->
-  <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen" >
-    <param name="next_drone_ip" value="$(arg next_drone_ip)" type="string"/>
-    <param name="broadcast_ip" value="$(arg broadcast_ip)" type="string"/>
+  <arg name="uav_id" default="1"/>
+  <arg name="swarm_num" default="2"/>
+  <arg name="next_drone_ip" default="127.0.0.1"/>
+  <arg name="broadcast_ip" default="192.168.1.255"/>
+  <arg name="bind_ip" default="0.0.0.0"/>
+  <arg name="tcp_port" default="8080"/>
+  <arg name="tcp_peer_port" default="8080"/>
+  <arg name="udp_port" default="8081"/>
+  <arg name="udp_peer_port" default="8081"/>
+  <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen">
     <param name="drone_id" value="$(arg uav_id)"/>
-    <param name="odom_max_freq" value="70"/>
+    <param name="swarm_num" value="$(arg swarm_num)"/>
+    <param name="next_drone_ip" value="$(arg next_drone_ip)"/>
+    <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
+    <param name="bind_ip" value="$(arg bind_ip)"/>
+    <param name="tcp_port" value="$(arg tcp_port)"/>
+    <param name="tcp_peer_port" value="$(arg tcp_peer_port)"/>
+    <param name="udp_port" value="$(arg udp_port)"/>
+    <param name="udp_peer_port" value="$(arg udp_peer_port)"/>
   </node>
-
 </launch>

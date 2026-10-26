@@ -15,16 +15,17 @@ source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash
 
 WORLD_FRAME="${WORLD_FRAME:-1}"
-LIDAR_ID="${LIDAR_ID:-192_168_2_174}"
+TFMINI_ID="${TFMINI_ID:-0}"
+LIDAR_ID="${LIDAR_ID:-192_168_2_181}"
 
 if [ "$WORLD_FRAME" = "1" ]; then
-  MAVROS_ARGS="enable_world_frame:=true"
+  MAVROS_ARGS="enable_world_frame:=true tfmini_id:=$TFMINI_ID"
   DRIVER_CMD="roslaunch fast_lio swarm_mid360_driver.launch uav_id:=1"
   LIO_CMD="roslaunch fast_lio mapping_mid360.launch uav_id:=1 enable_world_frame:=true lidar_topic:=/uav1/livox/lidar_$LIDAR_ID imu_topic:=/uav1/livox/imu_$LIDAR_ID"
   CONTROL_ARGS="swarm_num:=1 uav_id:=1 enable_world_frame:=true uav_init_x:=0.0 uav_init_y:=0.0 uav_init_z:=0.0 uav_init_yaw:=0.0"
   PLANNER_ARGS="uav_id:=1 enable_world_frame:=true"
 else
-  MAVROS_ARGS=""
+  MAVROS_ARGS="tfmini_id:=$TFMINI_ID"
   DRIVER_CMD="roslaunch livox_ros_driver2 msg_MID360.launch"
   LIO_CMD="roslaunch fast_lio mapping_mid360.launch"
   CONTROL_ARGS=""

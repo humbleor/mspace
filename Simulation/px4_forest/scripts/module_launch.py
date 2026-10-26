@@ -75,9 +75,8 @@ def prepare_modules(root,out,goals,grid=None,world_frame=False,uav_id=1,swarm_nu
         control_args.update({"enable_world_frame":"true",**dict(zip(("uav_init_x","uav_init_y","uav_init_z","uav_init_yaw"),map(str,initial)))})
     for k,v in control_args.items():
         ET.SubElement(control,"arg",name=k,value=v)
-    # The controller reads this case-sensitive parameter; the template's
-    # lowercase takeoff_height is not consumed by the current implementation.
-    ET.SubElement(wrapper,"param",name=f"/swarm_controller_uav_{uav_id}/Takeoff_height",value="1.2",type="double")
+    # Keep the generated takeoff target consistent with the canonical launch key.
+    ET.SubElement(wrapper,"param",name=f"/swarm_controller_uav_{uav_id}/takeoff_height",value="1.2",type="double")
     planner=ET.parse(root/"Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch")
     for e in planner.getroot().findall("arg"):
         if e.get("name")=="uav_id":

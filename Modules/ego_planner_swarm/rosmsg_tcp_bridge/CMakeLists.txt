@@ -7,6 +7,7 @@ ADD_COMPILE_OPTIONS(-std=c++14 )
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -Wall -g")
 
 find_package(Eigen3 REQUIRED)
+find_package(Threads REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
@@ -28,8 +29,13 @@ include_directories(
 add_executable(bridge_node
   src/bridge_node.cpp 
   )
+add_dependencies(bridge_node ${catkin_EXPORTED_TARGETS})
 target_link_libraries(bridge_node 
-  ${catkin_LIBRARIES}
+  ${catkin_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT}
   )
 
 
+
+catkin_install_python(PROGRAMS scripts/bridge_probe.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(DIRECTORY launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)

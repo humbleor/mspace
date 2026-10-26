@@ -76,7 +76,7 @@ class FleetTests(unittest.TestCase):
                 visualization=next(e for e in planner.findall("node") if e.get("type")=="odom_visualization")
                 self.assertEqual(visualization.find("param[@name='tf45']").get("value"),"false")
                 self.assertEqual(wrapper.find("group/param").get("name"),"output_root")
-                height=wrapper.find("param[@name='/swarm_controller_uav_%d/Takeoff_height']"%v.uav_id)
+                height=wrapper.find("param[@name='/swarm_controller_uav_%d/takeoff_height']"%v.uav_id)
                 self.assertIsNotNone(height)
                 self.assertEqual(float(height.get("value")),1.2)
                 trigger=planner.find("remap[@from='/traj_start_trigger']")

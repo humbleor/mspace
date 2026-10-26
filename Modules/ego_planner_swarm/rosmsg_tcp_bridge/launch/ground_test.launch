@@ -1,0 +1,15 @@
+<launch>
+  <!-- Localhost-only, bridge nodes only: no PX4, MAVROS, EGO or flight controller. -->
+  <include file="$(find rosmsg_tcp_bridge)/launch/bridge.launch">
+    <arg name="uav_id" value="1"/><arg name="bind_ip" value="127.0.0.1"/>
+    <arg name="next_drone_ip" value="127.0.0.1"/><arg name="broadcast_ip" value="127.0.0.1"/>
+    <arg name="tcp_port" value="18080"/><arg name="tcp_peer_port" value="28080"/>
+    <arg name="udp_port" value="18081"/><arg name="udp_peer_port" value="28081"/>
+  </include>
+  <include file="$(find rosmsg_tcp_bridge)/launch/bridge.launch">
+    <arg name="uav_id" value="2"/><arg name="bind_ip" value="127.0.0.1"/>
+    <arg name="next_drone_ip" value="127.0.0.1"/><arg name="broadcast_ip" value="127.0.0.1"/>
+    <arg name="tcp_port" value="28080"/><arg name="tcp_peer_port" value="18080"/>
+    <arg name="udp_port" value="28081"/><arg name="udp_peer_port" value="18081"/>
+  </include>
+</launch>

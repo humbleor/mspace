@@ -71,6 +71,7 @@ namespace ego_planner
     bool odom_twist_in_body_ = false;
     bool strict_waypoint_tracking_; // Confirm each mission point from odometry.
     bool enable_fail_safe_;
+    bool bridge_mode_ = false;
 
     /* planning data */
     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;
@@ -91,6 +92,7 @@ namespace ego_planner
     /* ROS utils */
     ros::NodeHandle node_;
     ros::Timer exec_timer_, safety_timer_;
+    ros::Subscriber bridge_request_sub_;
     ros::Subscriber waypoint_sub_, odom_sub_, swarm_trajs_sub_, broadcast_bspline_sub_, trigger_sub_;
     ros::Publisher replan_pub_, new_pub_, bspline_pub_, data_disp_pub_, swarm_trajs_pub_, broadcast_bspline_pub_;
 
@@ -129,7 +131,8 @@ namespace ego_planner
     void BroadcastBsplineCallback(const traj_utils::BsplinePtr &msg);
 
     bool checkCollision();
-    void publishSwarmTrajs(bool startup_pub);
+    void publishSwarmTrajs(bool startup_pub, bool broadcast = true);
+    void bridgeRequestCallback(const std_msgs::EmptyConstPtr &msg);
 
   public:
     EGOReplanFSM(/* args */)
