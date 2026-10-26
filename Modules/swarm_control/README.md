@@ -195,11 +195,15 @@
 
 ### 4. `swarm_ground_station` — 地面站
 
-监控所有无人机状态的控制台节点，订阅全部 UAV 的 `DroneState` 和 `SwarmCommand`，2Hz 打印状态摘要。
+监控所有无人机状态的控制台节点，订阅全部 UAV 的 `DroneState`、`SwarmCommand` 和 `/uavX/frame_ready`，每 2 秒打印状态摘要。
+
+`frame_ready` 默认显示 `False`，收到消息后显示其布尔值 `False` 或 `True`。
 
 ### 5. `swarm_terminal_control` — 终端手动控制
 
-调试用手动控制节点，提供交互式菜单：
+调试用手动控制节点。
+
+`ego_station.launch` 默认 `start_terminal_control:=false`，保留地面站状态显示和 RViz；需要人工指令终端时显式传入 `start_terminal_control:=true`，双机时会同时启用两个终端。提供交互式菜单：
 1. Move (XYZ_POS) — 手动输入目标位姿
 2. EGO Goal — 发布目标点触发 EGO 规划 (`/uavX/prometheus/ego/goal`)
 3. Hold / Land / Disarm

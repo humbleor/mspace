@@ -1,11 +1,11 @@
 <launch>
 	<!-- 无人机集群数量 -->
 	<arg name="swarm_num" default="1"/>
-	<!-- 可关闭人工指令终端，同时保留地面站状态显示和 RViz；默认保持原有行为。 -->
-	<arg name="start_terminal_control" default="true"/>
+	<!-- 默认关闭人工指令终端；地面站仍显示各机 frame_ready，调试时可显式启用。 -->
+	<arg name="start_terminal_control" default="false"/>
 
 	<!-- 启动地面站 -->
-	<node pkg="prometheus_swarm_control" type="swarm_ground_station" name="swarm_ground_station" output="screen" launch-prefix="gnome-terminal --tab --">	
+	<node pkg="prometheus_swarm_control" type="swarm_ground_station" name="swarm_ground_station" output="screen" launch-prefix="gnome-terminal --tab --">
 		<param name="swarm_num" value="$(arg swarm_num)"/>
 	</node>
 

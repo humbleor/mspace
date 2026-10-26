@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <Eigen/Eigen>
 #include <math.h>
+#include <std_msgs/Bool.h>
 
 #include <prometheus_msgs/Message.h>
 #include <prometheus_msgs/ControlCommand.h>
@@ -30,6 +31,13 @@ geometry_msgs::PoseStamped ref_pose_uav[MAX_UAV_NUM+1];
 
 ros::Subscriber drone_state_sub[MAX_UAV_NUM+1];
 ros::Subscriber command_sub[MAX_UAV_NUM+1];
+ros::Subscriber frame_ready_sub[MAX_UAV_NUM+1];
+bool frame_ready[MAX_UAV_NUM+1] = {};
+
+void frame_ready_cb(const std_msgs::Bool::ConstPtr& msg, int id)
+{
+    frame_ready[id] = msg->data;
+}
 
 void swarm_command_cb(const prometheus_msgs::SwarmCommand::ConstPtr& msg, int id)
 {
@@ -53,6 +61,7 @@ int main(int argc, char **argv)
 
     for(int i = 1; i <= swarm_num_uav; i++) 
     {
+        frame_ready_sub[i] = nh.subscribe<std_msgs::Bool>("/uav" + std::to_string(i) + "/frame_ready", 1, boost::bind(frame_ready_cb, _1, i));
         // 订阅
         command_sub[i] = nh.subscribe<prometheus_msgs::SwarmCommand>("/uav" + std::to_string(i) + "/prometheus/swarm_command", 10, boost::bind(swarm_command_cb,_1,i));
         drone_state_sub[i] = nh.subscribe<prometheus_msgs::DroneState>("/uav" + std::to_string(i) + "/prometheus/drone_state", 10, boost::bind(drone_state_cb,_1,i));
@@ -119,6 +128,7 @@ void printf_swarm_state(int swarm_num, int uav_id, const prometheus_msgs::DroneS
     }
 
     cout << "[ " << _Drone_state.mode<<" ] " <<endl;
+    cout << "frame_ready: " << (frame_ready[uav_id] ? "True" : "False") << endl;
 
     cout << "Position [X Y Z] : " << _Drone_state.position[0] << " [ m ] "<< _Drone_state.position[1]<<" [ m ] "<<_Drone_state.position[2]<<" [ m ] "<<endl;
     cout << "Velocity [X Y Z] : " << _Drone_state.velocity[0] << " [m/s] "<< _Drone_state.velocity[1]<<" [m/s] "<<_Drone_state.velocity[2]<<" [m/s] "<<endl;
