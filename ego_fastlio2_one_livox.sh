@@ -38,6 +38,6 @@ gnome-terminal \
 --tab -e "bash -c 'sleep 5; $DRIVER_CMD; exec bash'" \
 --tab -e "bash -c 'sleep 15; $LIO_CMD; exec bash'" \
 --tab -e "bash -c 'sleep 10; roslaunch prometheus_swarm_control ego_swarm_control.launch $CONTROL_ARGS; exec bash'" \
---tab -e "bash -c 'sleep 10; roslaunch ego_planner real_ego_run.launch $PLANNER_ARGS; exec bash'" \
+--tab -e "bash -c 'sleep 30; roslaunch ego_planner real_ego_run.launch $PLANNER_ARGS; exec bash'" \
 --tab -e "bash -c 'sleep 15; roslaunch prometheus_swarm_control ego_station.launch; exec bash'" \
 --tab -e "bash -c 'sleep 5; roslaunch realsense2_camera rs_camera.launch; exec bash'"
