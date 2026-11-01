@@ -8,6 +8,7 @@ Usage: bash Simulation/start.sh [full|small|short|hover|swarm|test|build] [optio
   full   Default: original generateWps 15-point grid, Gazebo + RViz.
   small  Six-point grid.   short  Takeoff + first scene goal.
   swarm  N-UAV shared-world run: --fleet CONFIG --output DIR [--stage hover|forest].
+         Defaults to RViz + Gazebo; --gui none disables windows.
          Other arguments are passed to: python3 Simulation/run.py px4 swarm --help
   hover  PX4/physics only. test  All simulation tests. build  PX4/plugin build.
 Options for flight modes (relative paths use the project root):

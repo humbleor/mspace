@@ -4,7 +4,7 @@
 import argparse
 from collections import deque
 from dataclasses import dataclass, field
-import hashlib, json, os, signal, subprocess, sys, threading, time, traceback
+import json, os, shutil, signal, subprocess, sys, threading, time, traceback
 from pathlib import Path
 import xml.etree.ElementTree as ET
 import xmlrpc.client
@@ -18,11 +18,13 @@ from renderer import read_pcd
 from bvh_renderer import BVHRenderer
 from scene import to_local
 from fleet import load_fleet, allocate_ports, gazebo_environment, bounded_call
+from fleet_visualization import prepare_rviz, route_markers, vehicle_label
 from fleet_evidence import all_ready, all_settled, pair_separation, audit_graph
 from runtime_model import prepare_model, compose_world
 from module_launch import prepare_modules
 from motion import lidar_motion
-from forest_geometry import extract_geometry, geometry_model
+from forest_geometry import geometry_model
+from fleet_startup import StartupStages, cached_geometry, open_windows, contact_message
 from collision_evidence import ego_acceptance
 from contact_evidence import contact_records, contact_acceptance
 from mission_evidence import ordered_arrivals
@@ -123,7 +125,7 @@ def parser():
         "--fleet",
         type=Path,
         required=True,
-        help="JSON vehicles: uav_id, instance, initial [x,y,z,yaw], world goals",
+        help="JSON vehicles: uav_id, instance, initial [x,y,z,yaw], world goals or grid",
     )
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--stage", choices=["hover", "forest"], default="forest")
@@ -155,7 +157,10 @@ def parser():
         action="store_true",
         help="Diagnostic only; cannot pass forest acceptance",
     )
-    ap.add_argument("--gui", choices=["none", "gazebo"], default="none")
+    ap.add_argument(
+        "--gui", choices=["both", "gazebo", "rviz", "none"], default="both",
+        help="Visualization windows (default: both); none for headless runs",
+    )
     ap.add_argument("--keep-open", action="store_true")
     ap.add_argument(
         "--prepare-only",
@@ -207,47 +212,69 @@ def main(argv=None):
     plugin = ROOT / "artifacts/px4_forest/plant_build/libmspace_forest_plant.so"
     if not binary.is_file() or not plugin.is_file():
         ap.error("Build isolated PX4/plugin first")
-    if a.gui != "none" and not (
+    if not a.prepare_only and a.gui != "none" and not (
         os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
     ):
         ap.error("No graphical display")
+    if not a.prepare_only:
+        programs = []
+        if a.gui in ("both", "gazebo"):
+            programs.append("gzclient")
+        if a.gui in ("both", "rviz"):
+            programs.append("rviz")
+        for program in programs:
+            if not shutil.which(program):
+                ap.error(program + " is not installed")
     out.mkdir(parents=True, exist_ok=True)
+    startup = StartupStages(out)
+    print("Output: %s" % out, flush=True)
     (out / "ros_home").mkdir()
     ports = allocate_ports(specs)
     aircraft = []
-    for v in specs:
-        d = out / v.name
-        d.mkdir()
-        for name in ("Log", "PCD"):
-            (d / name).mkdir()
-        goals = np.vstack([[v.initial[0], v.initial[1], 1.2], v.goals])
-        c = Aircraft(v, d, goals)
-        aircraft.append(c)
-        c.module_alignment = prepare_modules(
-            ROOT,
-            d,
-            goals,
-            world_frame=True,
-            uav_id=v.uav_id,
-            swarm_num=len(specs),
-            initial=v.initial,
-            sensor_prefix=v.sensor_prefix,
-            trigger_topic=v.namespace + "/traj_start_trigger",
-        )
-        write_json(d / "module_alignment.json", c.module_alignment)
-        gazebo = prepare_model(
-            px4,
-            d,
-            plugin,
-            ports["vehicles"][v.name],
-            v.instance,
-            gps=a.stage == "hover",
-            model_name=v.model_name,
-            pose=[v.initial[0], v.initial[1], 0.25, 0, 0, v.initial[3]],
-            sensor_prefix=v.sensor_prefix,
-            physics_speed=a.speed if v.uav_id == 1 else None,
-        )
-    compose_world([c.output / "iris.sdf" for c in aircraft], out / "forest.world")
+    with startup.stage('Prepare aircraft models and navigation configs'):
+        for v in specs:
+            d = out / v.name
+            d.mkdir()
+            for name in ("Log", "PCD"):
+                (d / name).mkdir()
+            goals = np.vstack([[v.initial[0], v.initial[1], 1.2], v.goals])
+            write_json(
+                d / "route_goals.json",
+                {
+                    "frame": "world",
+                    "generator": "generateWps" if v.grid is not None else "goals",
+                    "grid": v.grid,
+                    "goals": goals,
+                },
+            )
+            c = Aircraft(v, d, goals)
+            aircraft.append(c)
+            c.module_alignment = prepare_modules(
+                ROOT,
+                d,
+                goals,
+                grid=v.grid,
+                world_frame=True,
+                uav_id=v.uav_id,
+                swarm_num=len(specs),
+                initial=v.initial,
+                sensor_prefix=v.sensor_prefix,
+                trigger_topic=v.namespace + "/traj_start_trigger",
+            )
+            write_json(d / "module_alignment.json", c.module_alignment)
+            gazebo = prepare_model(
+                px4,
+                d,
+                plugin,
+                ports["vehicles"][v.name],
+                v.instance,
+                gps=a.stage == "hover",
+                model_name=v.model_name,
+                pose=[v.initial[0], v.initial[1], 0.25, 0, 0, v.initial[3]],
+                sensor_prefix=v.sensor_prefix,
+                physics_speed=a.speed if v.uav_id == 1 else None,
+            )
+        compose_world([c.output / "iris.sdf" for c in aircraft], out / "forest.world")
     env = os.environ.copy()
     env["PATH"] = (
         str(binary.parent)
@@ -282,6 +309,9 @@ def main(argv=None):
         ).strip(),
     }
     write_json(out / "manifest.json", manifest)
+    rviz_config = prepare_rviz(ROOT, out, specs)
+    print("RViz config: %s" % (ROOT / "Simulation/px4_forest/config/fleet.rviz"), flush=True)
+    print("RViz run snapshot: %s" % rviz_config, flush=True)
     if a.prepare_only:
         print("Prepared %d aircraft: %s" % (len(specs), out))
         return
@@ -341,52 +371,52 @@ def main(argv=None):
             from generate_mid360_bag import templates_from_bag
             from scan_message import pack_scan
 
-            scene = json.loads(a.scene.read_text())
-            map_origin = np.asarray(scene["origin_world"], float)
-            map_origin[2] -= a.map_height
-            local_map = to_local(
-                read_pcd(scene["map"]),
-                map_origin,
-                np.asarray(scene["rotation_world_from_local"]),
-            )
-            renderer = BVHRenderer(local_map, threads=a.render_threads)
-            templates = templates_from_bag(
-                a.template_bag, "/livox/lidar_192_168_2_181", 24, 0.1, window=(40, 120)
-            )
+            with startup.stage('Read and transform forest PCD'):
+                scene = json.loads(a.scene.read_text())
+                map_origin = np.asarray(scene["origin_world"], float)
+                map_origin[2] -= a.map_height
+                local_map = to_local(
+                    read_pcd(scene["map"]),
+                    map_origin,
+                    np.asarray(scene["rotation_world_from_local"]),
+                )
+            with startup.stage('Build lidar renderer (normals and BVH)'):
+                renderer = BVHRenderer(local_map, threads=a.render_threads)
+            with startup.stage('Read Mid-360 scan templates'):
+                templates = templates_from_bag(
+                    a.template_bag, "/livox/lidar_192_168_2_181", 24, 0.1, window=(40, 120)
+                )
             cfg = yaml.safe_load(
                 (ROOT / "Modules/fast_lio2/config/mid360.yaml").read_text()
             )
             extrinsic_T = np.asarray(cfg["mapping"]["extrinsic_T"])
             extrinsic_R = np.asarray(cfg["mapping"]["extrinsic_R"]).reshape(3, 3)
             if not a.no_tree_collision:
-                geometry = (
-                    json.loads(a.forest_geometry.read_text())
-                    if a.forest_geometry
-                    else extract_geometry(local_map)
-                )
-                digest = hashlib.sha256(
-                    np.ascontiguousarray(local_map, dtype="<f8").tobytes()
-                ).hexdigest()
-                if (
-                    geometry.get("local_map_sha256") != digest
-                    or geometry.get("frame") != "world"
-                    or not geometry.get("colliders")
-                ):
-                    raise ValueError("Forest geometry does not match shared local map")
-                write_json(out / "forest_geometry.json", geometry)
-        launch(["roscore", "-p", ports["ros"]], "roscore.log")
-        proxy = xmlrpc.client.ServerProxy(env["ROS_MASTER_URI"])
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                if bounded_call(lambda: proxy.getPid("/forest_swarm"), 1.0)[0] == 1:
-                    break
-            except (OSError, TimeoutError):
-                pass
-            check_processes()
-            if time.monotonic() > deadline:
-                raise RuntimeError("ROS master startup timeout")
-            time.sleep(0.1)
+                with startup.stage("Load cached or extract forest geometry"):
+                    geometry, cache_info = cached_geometry(
+                        local_map, ROOT / "artifacts/px4_forest/geometry_cache",
+                        previous_root=ROOT / "artifacts/px4_forest",
+                        explicit=a.forest_geometry,
+                    )
+                    print("Forest geometry source: %s (%s)" % (
+                        cache_info["source"], cache_info.get("previous_path")
+                        or cache_info.get("cache_path") or cache_info.get("path")), flush=True)
+                    write_json(out / "forest_geometry.json", geometry)
+                    write_json(out / "geometry_cache.json", cache_info)
+        with startup.stage('Start private ROS master'):
+            launch(["roscore", "-p", ports["ros"]], "roscore.log")
+            proxy = xmlrpc.client.ServerProxy(env["ROS_MASTER_URI"])
+            deadline = time.monotonic() + 30
+            while True:
+                try:
+                    if bounded_call(lambda: proxy.getPid("/forest_swarm"), 1.0)[0] == 1:
+                        break
+                except (OSError, TimeoutError):
+                    pass
+                check_processes()
+                if time.monotonic() > deadline:
+                    raise RuntimeError("ROS master startup timeout")
+                time.sleep(0.1)
         import rospy as ros
 
         rospy = ros
@@ -395,7 +425,7 @@ def main(argv=None):
         from sensor_msgs import point_cloud2
         from geometry_msgs.msg import PoseStamped, Pose
         from std_msgs.msg import Header, Bool
-        from visualization_msgs.msg import Marker
+        from visualization_msgs.msg import Marker, MarkerArray
         from mavros_msgs.msg import State, PositionTarget
         from mavros_msgs.srv import SetMode, CommandBool, ParamGet
         from livox_ros_driver2.msg import CustomMsg
@@ -540,71 +570,106 @@ def main(argv=None):
             c.set_mode = rospy.ServiceProxy(ns + "/mavros/set_mode", SetMode)
             c.arm = rospy.ServiceProxy(ns + "/mavros/cmd/arming", CommandBool)
             c.get_param = rospy.ServiceProxy(ns + "/mavros/param/get", ParamGet)
-        for c in aircraft:
+        with startup.stage('Start PX4 instances and Gazebo backend'):
+            for c in aircraft:
+                launch(
+                    [binary, "-i", c.spec.instance, "-d", "-s", "etc/init.d-posix/rcS"],
+                    c.spec.name + "/px4.log",
+                    c.output,
+                )
             launch(
-                [binary, "-i", c.spec.instance, "-d", "-s", "etc/init.d-posix/rcS"],
-                c.spec.name + "/px4.log",
-                c.output,
+                [
+                    "gzserver",
+                    "--verbose",
+                    out / "forest.world",
+                    "-s",
+                    "/opt/ros/noetic/lib/libgazebo_ros_api_plugin.so",
+                ],
+                "gazebo.log",
+                child_env=gazebo_environment(env),
             )
-        launch(
-            [
-                "gzserver",
-                "--verbose",
-                out / "forest.world",
-                "-s",
-                "/opt/ros/noetic/lib/libgazebo_ros_api_plugin.so",
-            ],
-            "gazebo.log",
-            child_env=gazebo_environment(env),
-        )
-        mavros_share = Path(rospkg.RosPack().get_path("mavros"))
-        for c in aircraft:
-            v = c.spec
-            cfg = yaml.safe_load(
-                (ROOT / "Experiment/mavros/launch/px4_config.yaml").read_text()
-            )
-            cfg["conn"]["timeout"] = max(10.0, 3.0 / a.speed)
-            cfg["local_position"] = {
-                "frame_id": v.name + "/fcu_local",
-                "tf": {
-                    "send": True,
+        with startup.stage("Open RViz and Gazebo windows"):
+            windows.extend(open_windows(a.gui, rviz_config, launch))
+            if a.gui in ("both", "rviz"):
+                for c in aircraft:
+                    goals_view = rospy.Publisher(
+                        "/sim/view/" + c.spec.name + "/goals", MarkerArray,
+                        queue_size=1, latch=True,
+                    )
+                    goals_view.publish(route_markers(c.goals[1:], c.spec.uav_id))
+                    handles_ros.append(goals_view)
+                    label_view = rospy.Publisher(
+                        "/sim/view/" + c.spec.name + "/vehicle", MarkerArray,
+                        queue_size=1, latch=True,
+                    )
+
+                    def publish_label(event, c=c, publisher=label_view):
+                        with c.lock:
+                            if not c.world:
+                                return
+                            row = c.world[-1]
+                        publisher.publish(vehicle_label(
+                            c.spec.name, row[1:4], c.spec.uav_id,
+                            rospy.Time.from_sec(row[0]),
+                        ))
+
+                    handles_ros.extend([label_view, rospy.Timer(rospy.Duration(0.2), publish_label)])
+            if a.gui in ("both", "rviz") and local_map is not None:
+                from visualize_sitl import make_cloud
+
+                forest_view = rospy.Publisher(
+                    "/sim/view/forest", PointCloud2, queue_size=1, latch=True
+                )
+                forest_view.publish(make_cloud(local_map))
+        with startup.stage('Start MAVROS and wait for all aircraft'):
+            mavros_share = Path(rospkg.RosPack().get_path("mavros"))
+            for c in aircraft:
+                v = c.spec
+                cfg = yaml.safe_load(
+                    (ROOT / "Experiment/mavros/launch/px4_config.yaml").read_text()
+                )
+                cfg["conn"]["timeout"] = max(10.0, 3.0 / a.speed)
+                cfg["local_position"] = {
                     "frame_id": v.name + "/fcu_local",
-                    "child_frame_id": v.name + "/base_link",
-                    "send_fcu": False,
-                },
-            }
-            cfg["imu"]["frame_id"] = v.name + "/base_link"
-            (c.output / "mavros_config.yaml").write_text(yaml.safe_dump(cfg))
-            wrapper = ET.Element("launch")
-            group = ET.SubElement(wrapper, "group", ns=v.name)
-            inc = ET.SubElement(
-                group, "include", file=str(mavros_share / "launch/node.launch")
-            )
-            p = ports["vehicles"][v.name]
-            for key, value in {
-                "pluginlists_yaml": str(
-                    ROOT / "Experiment/mavros/launch/px4_pluginlists.yaml"
-                ),
-                "config_yaml": str(c.output / "mavros_config.yaml"),
-                "gcs_url": "",
-                "tgt_component": "1",
-                "fcu_url": "udp://127.0.0.1:%d@127.0.0.1:%d" % (p["mavros"], p["px4"]),
-                "tgt_system": str(v.system_id),
-            }.items():
-                ET.SubElement(inc, "arg", name=key, value=value)
-            ET.ElementTree(wrapper).write(
-                c.output / "mavros.launch", encoding="unicode"
-            )
-            launch(["roslaunch", c.output / "mavros.launch"], v.name + "/mavros.log")
-        deadline = time.monotonic() + 100
-        while not all_ready(
-            c.truth and c.truth[-1][0] > 2 and c.state is not None and c.state.connected
-            for c in aircraft
-        ):
-            check_processes()
-            if time.monotonic() > deadline:
-                raise RuntimeError("Fleet physics/PX4/MAVROS startup timeout")
-            time.sleep(0.05)
+                    "tf": {
+                        "send": True,
+                        "frame_id": v.name + "/fcu_local",
+                        "child_frame_id": v.name + "/base_link",
+                        "send_fcu": False,
+                    },
+                }
+                cfg["imu"]["frame_id"] = v.name + "/base_link"
+                (c.output / "mavros_config.yaml").write_text(yaml.safe_dump(cfg))
+                wrapper = ET.Element("launch")
+                group = ET.SubElement(wrapper, "group", ns=v.name)
+                inc = ET.SubElement(
+                    group, "include", file=str(mavros_share / "launch/node.launch")
+                )
+                p = ports["vehicles"][v.name]
+                for key, value in {
+                    "pluginlists_yaml": str(
+                        ROOT / "Experiment/mavros/launch/px4_pluginlists.yaml"
+                    ),
+                    "config_yaml": str(c.output / "mavros_config.yaml"),
+                    "gcs_url": "",
+                    "tgt_component": "1",
+                    "fcu_url": "udp://127.0.0.1:%d@127.0.0.1:%d" % (p["mavros"], p["px4"]),
+                    "tgt_system": str(v.system_id),
+                }.items():
+                    ET.SubElement(inc, "arg", name=key, value=value)
+                ET.ElementTree(wrapper).write(
+                    c.output / "mavros.launch", encoding="unicode"
+                )
+                launch(["roslaunch", c.output / "mavros.launch"], v.name + "/mavros.log")
+            deadline = time.monotonic() + 100
+            while not all_ready(
+                c.truth and c.truth[-1][0] > 2 and c.state is not None and c.state.connected
+                for c in aircraft
+            ):
+                check_processes()
+                if time.monotonic() > deadline:
+                    raise RuntimeError("Fleet physics/PX4/MAVROS startup timeout")
+                time.sleep(0.05)
         # One rendering/evaluation origin, never a separate forest origin per aircraft.
         offsets = np.array(
             [np.asarray(c.truth[-1][1:4]) - c.spec.initial[:3] for c in aircraft]
@@ -616,34 +681,35 @@ def main(argv=None):
             )
         manifest["gazebo_origin"] = origin
         write_json(out / "manifest.json", manifest)
-        if geometry is not None:
-            model = geometry_model(geometry, origin)
-            sdf = ET.Element("sdf", version="1.6")
-            sdf.append(model)
-            xml = ET.tostring(sdf, encoding="unicode")
-            (out / "forest_collisions.sdf").write_text(xml)
-            rospy.wait_for_service("/gazebo/spawn_sdf_model", timeout=30)
-            pose = Pose()
-            pose.orientation.w = 1
-            response = bounded_call(
-                lambda: rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)(
-                    "forest_collision_geometry", xml, "", pose, "world"
-                ),
-                10.0,
-            )
-            if not response.success:
-                raise RuntimeError("Forest spawn failed: " + response.status_message)
-            tree = ET.parse(out / "forest.world")
-            tree.getroot().find("world").append(model)
-            tree.write(out / "forest.world", encoding="unicode")
-        if a.stage == "forest":
-            for c in aircraft:
-                launch(
-                    ["roslaunch", c.output / "modules.launch"],
-                    c.spec.name + "/navigation.log",
+        with startup.stage('Spawn physical forest collision geometry'):
+            if geometry is not None:
+                model = geometry_model(geometry, origin)
+                sdf = ET.Element("sdf", version="1.6")
+                sdf.append(model)
+                xml = ET.tostring(sdf, encoding="unicode")
+                (out / "forest_collisions.sdf").write_text(xml)
+                rospy.wait_for_service("/gazebo/spawn_sdf_model", timeout=30)
+                pose = Pose()
+                pose.orientation.w = 1
+                response = bounded_call(
+                    lambda: rospy.ServiceProxy("/gazebo/spawn_sdf_model", SpawnModel)(
+                        "forest_collision_geometry", xml, "", pose, "world"
+                    ),
+                    10.0,
                 )
-        if a.gui == "gazebo":
-            windows.append(launch(["gzclient"], "gazebo_gui.log", critical=False))
+                if not response.success:
+                    raise RuntimeError("Forest spawn failed: " + response.status_message)
+                tree = ET.parse(out / "forest.world")
+                tree.getroot().find("world").append(model)
+                tree.write(out / "forest.world", encoding="unicode")
+        with startup.stage('Start per-aircraft navigation'):
+            if a.stage == "forest":
+                for c in aircraft:
+                    launch(
+                        ["roslaunch", c.output / "modules.launch"],
+                        c.spec.name + "/navigation.log",
+                    )
+        print("[startup] Initialization complete; entering fleet sensor/flight loop", flush=True)
         start = rospy.Time.now().to_sec()
         for c in aircraft:
             c.next_scan = start + 0.2
@@ -658,7 +724,7 @@ def main(argv=None):
             for c in aircraft:
                 with c.lock:
                     if c.contacts:
-                        raise RuntimeError(c.spec.name + ": physical tree/UAV contact")
+                        raise RuntimeError(contact_message(c.spec.name, c.contacts[0]))
                     if c.takeoff and a.stage == "forest" and not c.ready:
                         raise RuntimeError(c.spec.name + ": frame alignment lost")
                     # frame_ready and goal markers are event topics, not periodic sources.
@@ -891,7 +957,7 @@ def main(argv=None):
                 errors.extend(graph["errors"])
         if a.keep_open and success and windows:
             print(
-                "Fleet settled; physics paused. Close Gazebo or Ctrl+C to save.",
+                "Fleet settled; physics paused. Close visualization windows or Ctrl+C to save.",
                 flush=True,
             )
             try:
@@ -1128,6 +1194,7 @@ def main(argv=None):
             "status": "ok" if success and not errors else "failed",
             "errors": errors,
             "stage": a.stage,
+            "startup_timing": startup.records,
             "vehicles": reports,
             "pair_separation": pair,
             "graph_passed": graph.get("passed"),

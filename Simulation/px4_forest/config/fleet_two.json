@@ -9,30 +9,54 @@
         0,
         0
       ],
-      "goals": [
-        [
-          1.4,
-          -0.36,
-          1.5
-        ]
-      ]
+      "grid": {
+        "waypointDistriFlag": 0,
+        "grid_direction": 0,
+        "x": {
+          "min": 0,
+          "max": 9,
+          "step": 4
+        },
+        "y": {
+          "min": 0,
+          "max": 2,
+          "step": 2
+        },
+        "z": {
+          "min": 2,
+          "max": 2,
+          "step": 2
+        }
+      }
     },
     {
       "uav_id": 2,
       "instance": 21,
       "initial": [
-        1.5,
-        2,
+        0,
+        5,
         0,
         0
       ],
-      "goals": [
-        [
-          2.5,
-          2,
-          1.5
-        ]
-      ]
+      "grid": {
+        "waypointDistriFlag": 0,
+        "grid_direction": 0,
+        "x": {
+          "min": 0,
+          "max": 9,
+          "step": 4
+        },
+        "y": {
+          "min": 5,
+          "max": 7,
+          "step": 2
+        },
+        "z": {
+          "min": 2,
+          "max": 2,
+          "step": 2
+        }
+      }
     }
   ]
 }

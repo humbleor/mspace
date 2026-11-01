@@ -1,10 +1,13 @@
 """Validated per-aircraft configuration for a shared forest experiment."""
 
+import copy
 from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 import socket
+
+from waypoints import generate_wps
 
 
 @dataclass(frozen=True)
@@ -13,6 +16,7 @@ class Vehicle:
     instance: int
     initial: tuple
     goals: tuple
+    grid: dict = None
 
     @property
     def name(self):
@@ -36,7 +40,7 @@ class Vehicle:
 
 
 def load_fleet(source):
-    """Goals and initial [x,y,z,yaw] use the shared local forest world."""
+    """Goals, grids and initial [x,y,z,yaw] use the shared forest world."""
     data = (
         json.loads(Path(source).read_text())
         if isinstance(source, (str, Path))
@@ -55,7 +59,35 @@ def load_fleet(source):
                 "uav_id and instance must be integers; instance must be 0..253"
             )
         initial = row.get("initial")
+        if ("grid" in row) == ("goals" in row):
+            raise ValueError("each aircraft needs exactly one of grid or goals")
+        grid = None
         goals = row.get("goals")
+        if "grid" in row:
+            try:
+                grid = copy.deepcopy(row["grid"])
+                if not isinstance(grid, dict) or set(grid) - {
+                    "x", "y", "z", "grid_direction", "waypointDistriFlag"
+                }:
+                    raise ValueError("grid must be an object with x/y/z ranges")
+                for axis in "xyz":
+                    bounds = grid[axis]
+                    if (not isinstance(bounds, dict)
+                        or set(bounds) != {"min", "max", "step"}
+                        or not all(type(v) in (int, float) and math.isfinite(v)
+                                   for v in bounds.values())):
+                        raise ValueError(axis + " requires finite numeric min/max/step")
+                grid.setdefault("grid_direction", 0)
+                grid.setdefault("waypointDistriFlag", 0)
+                if (type(grid["grid_direction"]) is not int
+                    or type(grid["waypointDistriFlag"]) is not int):
+                    raise ValueError("grid direction and distribution must be integers")
+                goals = generate_wps(grid).tolist()
+                # Native EGO stores waypoints in a fixed double[300][3] array.
+                if len(goals) > 300:
+                    raise ValueError("native EGO grid exceeds 300 waypoints")
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("uav%d grid: %s" % (uid, exc)) from exc
         if (
             not isinstance(initial, list)
             or len(initial) != 4
@@ -80,6 +112,7 @@ def load_fleet(source):
                 instance,
                 tuple(float(x) for x in initial),
                 tuple(tuple(float(x) for x in g) for g in goals),
+                grid,
             )
         )
     result.sort(key=lambda v: v.uav_id)

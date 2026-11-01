@@ -10,24 +10,46 @@
 bash Simulation/start.sh build
 ```
 
-先双机物理悬停，再执行森林短程：
+先双机物理悬停，再执行森林网格任务：
 
 ```bash
 bash Simulation/start.sh swarm \
   --fleet Simulation/px4_forest/config/fleet_two.json \
   --stage hover --duration 45 --speed .5 \
-  --output artifacts/px4_forest/my_two_hover
+  --output "artifacts/px4_forest/two_hover_$(date +%Y%m%d_%H%M%S)"
 
 bash Simulation/start.sh swarm \
   --fleet Simulation/px4_forest/config/fleet_two.json \
   --scene artifacts/forest_lio/route_125_155.json \
-  --duration 120 --speed .25 \
-  --output artifacts/px4_forest/my_two_forest
+  --duration 600 --speed .25 \
+  --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)"
 ```
 
-默认无窗口，添加 `--gui gazebo` 查看物理世界；`--keep-open` 在任务稳定完成后暂停并保留窗口。多机入口自己生成 `report.md`，无需调用单机报告工具。
+默认同时启动 RViz 和 Gazebo：RViz 显示共享森林、各机世界坐标里程计、点云及规划轨迹，Gazebo 显示物理世界。可用 `--gui gazebo` / `--gui rviz` 只开一个窗口，`--gui none` 无窗口运行；`--keep-open` 在任务稳定完成后暂停并保留窗口。多机入口自己生成 `report.md`，无需调用单机报告工具。
 
 悬停模式保留 GPS，仅诊断双 PX4、MAVROS 与动力学，不启动 LIO/EGO，不代表 GNSS 拒止导航验收。森林模式移除 GPS，并禁止 Gazebo 向 PX4 注入真值外部位姿。
+
+## 启动进度、缓存与 RViz 配置
+
+终端会逐阶段打印 `[startup +Xs]`：模型/导航配置、PCD 读取、法向量/BVH、扫描模板、几何缓存/提取、ROS Master、PX4/Gazebo 后端、窗口、MAVROS 就绪、树木模型和导航启动。每阶段的墙钟耗时及失败状态写入本次输出目录的 `startup_timing.json`，结果报告也保留这些记录。`--speed` 只控制仿真倍率，不加速预处理。
+
+树木几何默认缓存在 `artifacts/px4_forest/geometry_cache/`。缓存键包含变换后点云内容、提取参数、几何格式与提取算法源码哈希；不匹配或损坏会重新生成，写入使用原子替换。已有运行只有带匹配的 `geometry_cache.json` 来源证明（算法及几何内容哈希）时才自动复用；旧版没有来源证明的文件不自动导入。`--forest-geometry PATH` 仍可显式指定同地图几何，但不会把显式覆盖提升为默认缓存。当前运行的 `geometry_cache.json` 记录来源，`forest_geometry.json` 保留实际使用的几何。
+
+RViz/Gazebo 窗口在后端进程启动后立即打开，早于 MAVROS 就绪检查、树木模型加载和导航启动，因此刚打开时可能暂时没有树木或飞机点云。地图/BVH/扫描模板等预处理仍在后端启动前完成。首次无可信缓存仍需提取几何，后续匹配运行跳过提取。
+
+多机可视化配置位于 `Simulation/px4_forest/config/fleet.rviz`，启动时会按当前 fleet 机数更新并打印绝对路径，不是固定的双机配置。本次运行同时在 `<本次输出目录>/fleet.rviz` 保留相同内容的快照供 RViz 加载，避免另一场仿真更新公共配置影响当前运行。RViz 进程已连接本次私有 ROS Master，另开 RViz 时也需使用该目录 `manifest.json` 中的 ROS Master 端口。
+
+航点显示使用每机 `/sim/view/uavN/goals`（MarkerArray，锁存完整原请求航点）。UAV1 为黄色、UAV2 为蓝色，颜色与各机点云/里程计保持一致；显示副本不修改规划器目标。里程计 `Keep=1`，仅保留最新箭头，规划轨迹仍独立显示。
+
+### 坐标就绪撤销
+
+`frame alignment lost` 表示适配器将 `/uavN/frame_ready` 置为 false；具体原因看本机 `navigation.log` 的 `Frame alignment INVALID`。运行 `two_forest_20261102_015154` 在仿真时间 43.004 秒记录：LIO age=0.184s、FCU age=0.004s，时间戳 skew=-0.18s 超出 `max_source_skew=0.15s`，触发锁存失效。两路 source age 尚未超过 0.5s；该记录证明时间戳不同步，尚不能单凭它归因为坐标跳变或某个线程故障。保护阈值未放宽。降低倍率到 `.25` 可用于检查负载影响，但不能保证解决定位或航线问题。
+
+### 物理接触报错
+
+`physical contact at ...: A <-> B` 表示 Gazebo 报告了实体接触，程序保留失败并退出；不是普通启动异常。查看 `uavN/contacts.json` 可区分树木与机间接触，`pair_separation.json` 单独记录机间间距。
+
+`two_forest_20261102_013846` 的首次接触为仿真时间 39.472 秒，UAV1 `rotor_0` 与 `trunk_0001` 接触，机间间距检查通过。该次 UAV1 的名义 PCD 径向净空检查通过，但真实转子/拟合树干接触失败，两者模型不同；不能据此把该网格视为可安全飞行。此次启动改进没有修改规划器、碰撞模型或该失败判定，森林路线闭环验证仍未通过。
 
 ## 三机及更多飞机
 
@@ -63,8 +85,36 @@ bash Simulation/start.sh swarm \
 - `instance`：每机唯一，范围 0..253。固定 PX4 v1.13.2 使用 `MAV_SYS_ID=instance+1`，MAVROS target_system 随之配置。
 - `initial`：公共 forest world 下的 x/y/z/yaw，单位米和弧度。当前适配器要求 z=0、水平静止初始化；起始相对位置和航向视为已知配置。
 - `goals`：公共 world 中的原请求航点，各机可不同；非空且高度至少 0.5 米。森林任务实际起飞高度为 1.2 米。
+- `grid`：与 `goals` 二选一，按本机范围和步长自动生成网格，使用 EGO 原生 `flight_type=3 / generateWps`。两者同时填写会报错。每机最多 300 个网格航点，与原生 EGO 数组容量一致。
 - 出生间距至少 1.2 米，且应满足 `--minimum-separation`；更换场景时必须重新选择出生点和航线。示例位置只针对默认森林准备。
 - 增加飞机只需追加记录，无需复制运行器或改写按 UAV 编号分支的代码。CPU、内存和实际传感器积压决定可运行规模。
+
+### 每机独立网格
+
+`fleet_two.json` 默认配置 UAV1 起点 `[0,0,0,0]`、UAV2 起点 `[0,5,0,0]`。两机分别使用自己的 `grid`，不是共同飞向同一份航点：
+
+| 飞机 | X 范围/步长 | Y 范围/步长 | Z 范围/步长 | 航点数 |
+| --- | --- | --- | --- | --- |
+| UAV1 | 0～20 / 5 | 0～2 / 2 | 2～2 / 2 | 10 |
+| UAV2 | 0～20 / 5 | 5～7 / 2 | 2～2 / 2 | 10 |
+
+每机记录中使用以下配置替代 `goals`（此处为 UAV2）：
+
+```json
+"grid": {
+  "waypointDistriFlag": 0,
+  "grid_direction": 0,
+  "x": {"min": 0, "max": 20, "step": 5},
+  "y": {"min": 5, "max": 7, "step": 2},
+  "z": {"min": 2, "max": 2, "step": 2}
+}
+```
+
+范围均为共享 forest world 的绝对坐标，不再叠加 `initial`。两项方向参数可省略，默认均为 0；`waypointDistriFlag` 当前只支持 0（网格），`grid_direction=0` 为 X 折返、Y 推进，1 为 Y 折返、X 推进。每轴必须是有限数值的 `min/max/step`，要求 `min<=max`、`step>0`；生成高度至少 0.5 米。非整除边界的顺序沿用原生生成器，不强制补齐终点。
+
+每机先在自己的起点起飞至 1.2 米，再触发自己的网格任务；生成航点记录在 `uavN/route_goals.json`（首项为起飞点），同一组网格航点用于原请求顺序到达验收。`--prepare-only` 可生成配置并检查每机航点及 launch，不会启动飞行进程。
+
+`--duration` 是整个任务的仿真秒数上限；120 秒不保证完成较长网格，可从 600 秒开始。上述条带只是示例配置，尚未完成这组起点/航线的闭环验收；分开配置航点也不等于已证明机间避碰和森林通行安全。
 
 ## 坐标和传感器
 

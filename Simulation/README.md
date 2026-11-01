@@ -129,10 +129,10 @@ bash Simulation/start.sh --help          # 查看全部选项
 
 ```bash
 bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
-  --output artifacts/px4_forest/my_two_forest --duration 120 --speed .25
+  --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)" --duration 600 --speed .25
 ```
 
-三机改用 `config/fleet_three.json`。多机入口默认无窗口，支持 `--gui gazebo`；每机独立雷达/IMU、LIO、MAVROS 和规划控制链。配置、坐标、速度、验收与验证边界见 [多机说明](px4_forest/docs/fleet.md)。
+双机示例起点为 `(0,0,0)` / `(0,5,0)`，每机根据自己的 `grid` 范围和步长生成航点；也可改用显式 `goals`，两者二选一。三机改用 `config/fleet_three.json`。多机入口默认同时启动 RViz 和 Gazebo，可用 `--gui gazebo` / `--gui rviz` 只开一个窗口，或 `--gui none` 无窗口运行；每机独立雷达/IMU、LIO、MAVROS 和规划控制链。配置、坐标、速度、验收与验证边界见 [多机说明](px4_forest/docs/fleet.md)。
 
 ## 5. 查看结果
 

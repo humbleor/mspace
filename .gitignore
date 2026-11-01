@@ -15,3 +15,5 @@ nano.save
 
 # Generated bag audits, maps and isolated ROS replay logs.
 /artifacts/
+
+docs/

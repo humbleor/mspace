@@ -1,0 +1,143 @@
+Panels:
+- Class: rviz/Displays
+  Name: Displays
+- Class: rviz/Views
+  Name: Views
+Visualization Manager:
+  Class: ''
+  Global Options:
+    Fixed Frame: world
+    Background Color: 35; 40; 48
+    Frame Rate: 20
+  Displays:
+  - Class: rviz/Grid
+    Name: Ground grid
+    Enabled: true
+    Cell Size: 1
+    Plane Cell Count: 40
+    Color: 100; 110; 120
+    Alpha: 0.35
+  - Class: rviz/PointCloud2
+    Name: Forest PCD (display only)
+    Enabled: true
+    Topic: /sim/view/forest
+    Queue Size: 2
+    Style: Points
+    Size (Pixels): 2
+    Size (m): 0.035
+    Position Transformer: XYZ
+    Color Transformer: AxisColor
+    Color: 80; 180; 110
+    Alpha: 0.65
+    Axis: Z
+  - Class: rviz/Group
+    Name: uav1
+    Enabled: true
+    Displays:
+    - Class: rviz/PointCloud2
+      Name: uav1 world cloud
+      Enabled: false
+      Topic: /uav1/world/cloud
+      Queue Size: 2
+      Style: Points
+      Size (Pixels): 2
+      Size (m): 0.035
+      Position Transformer: XYZ
+      Color Transformer: FlatColor
+      Color: 255; 230; 100
+      Alpha: 1
+    - Class: rviz/Odometry
+      Name: uav1 world odometry
+      Enabled: true
+      Topic: /uav1/world/odom
+      Keep: 1
+      Shape: Arrow
+      Color: 255; 230; 100
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.1
+    - Class: rviz/Marker
+      Name: uav1 planned trajectory
+      Enabled: true
+      Marker Topic: /uav_1_ego_planner_node/optimal_list
+      Queue Size: 10
+    - Class: rviz/Marker
+      Name: uav1 global reference
+      Enabled: true
+      Marker Topic: /uav_1_ego_planner_node/global_list
+      Queue Size: 10
+    - Class: rviz/MarkerArray
+      Name: uav1 requested waypoints
+      Enabled: true
+      Marker Topic: /sim/view/uav1/goals
+      Queue Size: 10
+    - Class: rviz/MarkerArray
+      Name: uav1 label
+      Enabled: true
+      Marker Topic: /sim/view/uav1/vehicle
+      Queue Size: 10
+  - Class: rviz/Group
+    Name: uav2
+    Enabled: true
+    Displays:
+    - Class: rviz/PointCloud2
+      Name: uav2 world cloud
+      Enabled: false
+      Topic: /uav2/world/cloud
+      Queue Size: 2
+      Style: Points
+      Size (Pixels): 2
+      Size (m): 0.035
+      Position Transformer: XYZ
+      Color Transformer: FlatColor
+      Color: 70; 190; 255
+      Alpha: 1
+    - Class: rviz/Odometry
+      Name: uav2 world odometry
+      Enabled: true
+      Topic: /uav2/world/odom
+      Keep: 1
+      Shape: Arrow
+      Color: 70; 190; 255
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.1
+    - Class: rviz/Marker
+      Name: uav2 planned trajectory
+      Enabled: true
+      Marker Topic: /uav_2_ego_planner_node/optimal_list
+      Queue Size: 10
+    - Class: rviz/Marker
+      Name: uav2 global reference
+      Enabled: true
+      Marker Topic: /uav_2_ego_planner_node/global_list
+      Queue Size: 10
+    - Class: rviz/MarkerArray
+      Name: uav2 requested waypoints
+      Enabled: true
+      Marker Topic: /sim/view/uav2/goals
+      Queue Size: 10
+    - Class: rviz/MarkerArray
+      Name: uav2 label
+      Enabled: true
+      Marker Topic: /sim/view/uav2/vehicle
+      Queue Size: 10
+  Tools:
+  - Class: rviz/Interact
+  - Class: rviz/MoveCamera
+  - Class: rviz/Select
+  Views:
+    Current:
+      Class: rviz/Orbit
+      Name: Current View
+      Distance: 20
+      Focal Point:
+        X: 5
+        Y: -1
+        Z: 1.5
+      Pitch: 0.65
+      Yaw: 0.7
+      Target Frame: world
+Window Geometry:
+  Width: 1300
+  Height: 850
+  X: 40
+  Y: 40
