@@ -60,7 +60,7 @@ python3 Simulation/run.py px4 report artifacts/px4_forest/my_forest
 
 ### 公共坐标（world 模式）
 
-加 `--world-frame` 把三个 Modules 入口绑定到 `swarm_frame_adapter`：Fast-LIO2 输出 `uav1/lio_init`，MAVROS 本地 frame 改为 `uav1/fcu_local`，控制器的 setpoint 经适配节点逆变换后下发。仿真地面站在 `/uav1/frame_ready` 为 true 前不发送起飞命令：
+森林阶段默认开启 `world-frame`（显式传入 `--world-frame` 仍兼容），把三个 Modules 入口绑定到 `swarm_frame_adapter`：Fast-LIO2 输出 `uav1/lio_init`，MAVROS 本地 frame 改为 `uav1/fcu_local`，控制器的 setpoint 经适配节点逆变换后下发。仿真地面站在 `/uav1/frame_ready` 为 true 前不发送起飞命令：
 
 ```bash
 python3 Simulation/run.py px4 run --stage forest \
@@ -69,7 +69,7 @@ python3 Simulation/run.py px4 run --stage forest \
   --goals 1 --world-frame
 ```
 
-运行目录额外生成 `world_frame_evidence.json`，校验四项不依赖适配节点自述证据的性质：固定变换刚性、初始锚点、world↔FCU 指令往返、world 点云对物理地图的对齐不劣于未变换点云。任一项不过（`passed=false`）则整次运行为 failed。开关只影响三个 Modules 入口和生成的 MAVROS 配置，默认关闭时与原基线完全一致；具体接线和实测结果见 [原模块接入约定](docs/module_alignment.md) 与 [WORLD_FRAME.md](../../Modules/swarm_control/WORLD_FRAME.md)。
+运行目录额外生成 `world_frame_evidence.json`，校验四项不依赖适配节点自述证据的性质：固定变换刚性、初始锚点、world↔FCU 指令往返、world 点云对物理地图的对齐不劣于未变换点云。任一项不过（`passed=false`）则整次运行为 failed。森林阶段默认启用；hover 阶段不使用该适配链路。该设置影响三个 Modules 入口和生成的 MAVROS 配置；具体接线和实测结果见 [原模块接入约定](docs/module_alignment.md) 与 [WORLD_FRAME.md](../../Modules/swarm_control/WORLD_FRAME.md)。
 
 ### 按 generateWps 生成完整网格路线
 

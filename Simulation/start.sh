@@ -11,6 +11,7 @@ Usage: bash Simulation/start.sh [full|small|short|hover|swarm|test|build] [optio
          Other arguments are passed to: python3 Simulation/run.py px4 swarm --help
   hover  PX4/physics only. test  All simulation tests. build  PX4/plugin build.
 Options for flight modes (relative paths use the project root):
+  --world-frame         Forest modes always use the shared world adapter (default).
   --scene PATH          Forest scene JSON.
   --output PATH         Empty output directory; default generates a unique one.
   --speed NUMBER        Simulation speed factor (default 0.5).
@@ -55,6 +56,7 @@ fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
+    --world-frame) shift ;;
     --scene) need_value "$@"; scene="$2"; shift 2 ;;
     --output) need_value "$@"; output="$2"; shift 2 ;;
     --speed) need_value "$@"; speed="$2"; shift 2 ;;
@@ -138,7 +140,7 @@ if [[ -e "$output" ]]; then
 fi
 command=(python3 "$PROJECT_ROOT/Simulation/run.py" px4 run --stage "$stage" --output "$output"
          --duration "$duration" --speed "$speed" --instance "$instance" --gui "$gui")
-if [[ "$stage" == forest ]]; then command+=(--scene "$scene" --template-bag "$bag" --collision-model "$collision_model" --body-radius "$body_radius" --obstacle-radius "$obstacle_radius" --max-truth-gap "$max_truth_gap" "${mission[@]}"); fi
+if [[ "$stage" == forest ]]; then command+=(--world-frame --scene "$scene" --template-bag "$bag" --collision-model "$collision_model" --body-radius "$body_radius" --obstacle-radius "$obstacle_radius" --max-truth-gap "$max_truth_gap" "${mission[@]}"); fi
 if [[ -n "$forest_geometry" ]]; then command+=(--forest-geometry "$forest_geometry"); fi
 if [[ "$tree_collision" == 0 ]]; then command+=(--no-tree-collision); fi
 if [[ "$keep_contact_open" == 1 ]]; then command+=(--keep-contact-open); fi

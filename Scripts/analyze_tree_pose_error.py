@@ -27,27 +27,27 @@ def parse_log_line(line):
     Returns (timestamp, dx, dy, yaw, matched) or None
     """
     try:
-        ts_match = re.search(r'\[(\d+\.\d+)\]:', line)
+        ts_match = re.search(r"\[(\d+\.\d+)\]:", line)
         if not ts_match:
             return None
-        if 'drone_dist=' not in line or 'trans=(' not in line:
+        if "drone_dist=" not in line or "trans=(" not in line:
             return None
 
         ts = float(ts_match.group(1))
 
-        trans_match = re.search(r'trans=\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)', line)
+        trans_match = re.search(r"trans=\(([-\d.]+),\s*([-\d.]+),\s*([-\d.]+)\)", line)
         if not trans_match:
             return None
         dx = float(trans_match.group(1))
         dy = float(trans_match.group(2))
         dz_yaw = float(trans_match.group(3))
 
-        yaw_match = re.search(r'yaw=([-\d.]+)\s*deg', line)
+        yaw_match = re.search(r"yaw=([-\d.]+)\s*deg", line)
         if not yaw_match:
             return None
         yaw = float(yaw_match.group(1))
 
-        matched_match = re.search(r'matched=(\d+)', line)
+        matched_match = re.search(r"matched=(\d+)", line)
         matched = int(matched_match.group(1)) if matched_match else 0
 
         return (ts, dx, dy, yaw, matched)
@@ -63,7 +63,7 @@ def parse_log_file(filepath):
     """
     all_entries = []
 
-    with open(filepath, 'r') as f:
+    with open(filepath, "r") as f:
         for line in f:
             result = parse_log_line(line)
             if result:
@@ -80,12 +80,12 @@ def parse_log_file(filepath):
     # Simple heuristic: assign alternating blocks
     # Look at the gap pattern between consecutive entries
     if len(all_entries) < 2:
-        return {'1': [all_entries[0]]}
+        return {"1": [all_entries[0]]}
 
     # Compute gaps between consecutive entries
     gaps = []
     for i in range(1, len(all_entries)):
-        gap = all_entries[i][0] - all_entries[i-1][0]
+        gap = all_entries[i][0] - all_entries[i - 1][0]
         gaps.append(gap)
 
     # Find the median gap - small gaps = same UAV, larger gaps = different UAV
@@ -96,14 +96,14 @@ def parse_log_file(filepath):
     threshold = max(median_gap * 2, 0.1)
 
     # Assign UAV IDs
-    data = {'1': [], '2': []}
-    current_uav = '1'
-    data['1'].append(all_entries[0])
+    data = {"1": [], "2": []}
+    current_uav = "1"
+    data["1"].append(all_entries[0])
 
     for i in range(1, len(all_entries)):
-        gap = all_entries[i][0] - all_entries[i-1][0]
+        gap = all_entries[i][0] - all_entries[i - 1][0]
         if gap > threshold:
-            current_uav = '2' if current_uav == '1' else '1'
+            current_uav = "2" if current_uav == "1" else "1"
         data[current_uav].append(all_entries[i])
 
     # Remove empty
@@ -117,7 +117,7 @@ def print_stats(name, entries):
         print(f"    No data.")
         return
     n = len(entries)
-    for key_idx, lbl in [(1, 'dx (m)'), (2, 'dy (m)'), (3, 'yaw (deg)')]:
+    for key_idx, lbl in [(1, "dx (m)"), (2, "dy (m)"), (3, "yaw (deg)")]:
         vals = [e[key_idx] for e in entries]
         mean = sum(vals) / n
         var = sum((v - mean) ** 2 for v in vals) / n
@@ -125,7 +125,9 @@ def print_stats(name, entries):
         max_abs = max(abs(v) for v in vals)
         max_val = max(vals)
         min_val = min(vals)
-        print(f"    {lbl:12s}: mean={mean:+.4f}, std={std:.4f}, max_abs={max_abs:.4f}, min={min_val:+.4f}, max={max_val:+.4f}")
+        print(
+            f"    {lbl:12s}: mean={mean:+.4f}, std={std:.4f}, max_abs={max_abs:.4f}, min={min_val:+.4f}, max={max_val:+.4f}"
+        )
     print(f"    Total samples: {n}")
 
 
@@ -142,8 +144,8 @@ def print_header(title):
 
 
 def main():
-    if '--log' in sys.argv:
-        idx = sys.argv.index('--log')
+    if "--log" in sys.argv:
+        idx = sys.argv.index("--log")
         if idx + 1 >= len(sys.argv):
             print("Error: --log requires a file path argument")
             return
@@ -199,21 +201,37 @@ def main():
         print("  python analyze_tree_pose_error.py --log <log_file>")
         return
 
-    mode = sys.argv[1] if len(sys.argv) > 1 else 'all'
+    mode = sys.argv[1] if len(sys.argv) > 1 else "all"
 
     stats = {}
-    rospy.init_node('tree_pose_error_stats', anonymous=True)
+    rospy.init_node("tree_pose_error_stats", anonymous=True)
 
-    if mode in ['1', '2']:
-        topic = f'/uav{mode}/tree_pose_error'
-        stats[mode] = {'x': [], 'y': [], 'z': []}
-        rospy.Subscriber(topic, Vector3, lambda msg, uav=mode: (stats[uav]['x'].append(msg.x), stats[uav]['y'].append(msg.y), stats[uav]['z'].append(msg.z)))
+    if mode in ["1", "2"]:
+        topic = f"/uav{mode}/tree_pose_error"
+        stats[mode] = {"x": [], "y": [], "z": []}
+        rospy.Subscriber(
+            topic,
+            Vector3,
+            lambda msg, uav=mode: (
+                stats[uav]["x"].append(msg.x),
+                stats[uav]["y"].append(msg.y),
+                stats[uav]["z"].append(msg.z),
+            ),
+        )
         print(f"Subscribing to {topic}")
-    elif mode == 'all':
-        for uav in ['1', '2']:
-            topic = f'/uav{uav}/tree_pose_error'
-            stats[uav] = {'x': [], 'y': [], 'z': []}
-            rospy.Subscriber(topic, Vector3, lambda msg, uav=uav: (stats[uav]['x'].append(msg.x), stats[uav]['y'].append(msg.y), stats[uav]['z'].append(msg.z)))
+    elif mode == "all":
+        for uav in ["1", "2"]:
+            topic = f"/uav{uav}/tree_pose_error"
+            stats[uav] = {"x": [], "y": [], "z": []}
+            rospy.Subscriber(
+                topic,
+                Vector3,
+                lambda msg, uav=uav: (
+                    stats[uav]["x"].append(msg.x),
+                    stats[uav]["y"].append(msg.y),
+                    stats[uav]["z"].append(msg.z),
+                ),
+            )
             print(f"Subscribing to {topic}")
     else:
         print(f"Unknown mode: {mode}")
@@ -225,7 +243,7 @@ def main():
         for uav in sorted(stats.keys()):
             d = stats[uav]
             print(f"\n  --- UAV{uav} ---")
-            for key, lbl in [('x', 'dx (m)'), ('y', 'dy (m)'), ('z', 'yaw (deg)')]:
+            for key, lbl in [("x", "dx (m)"), ("y", "dy (m)"), ("z", "yaw (deg)")]:
                 vals = d[key]
                 if not vals:
                     print(f"    {lbl}: No data")
@@ -235,7 +253,9 @@ def main():
                 var = sum((v - mean) ** 2 for v in vals) / n
                 std = math.sqrt(var)
                 max_abs = max(abs(v) for v in vals)
-                print(f"    {lbl:12s}: mean={mean:+.4f}, std={std:.4f}, max_abs={max_abs:.4f}")
+                print(
+                    f"    {lbl:12s}: mean={mean:+.4f}, std={std:.4f}, max_abs={max_abs:.4f}"
+                )
             print(f"    Total samples: {len(d['x'])}")
         print()
         sys.exit(0)
@@ -247,5 +267,5 @@ def main():
     rospy.spin()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

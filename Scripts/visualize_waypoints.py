@@ -34,7 +34,8 @@ import signal
 import sys
 import numpy as np
 import matplotlib
-matplotlib.use('TkAgg')  # Use TkAgg backend for cleaner Ctrl+C exit
+
+matplotlib.use("TkAgg")  # Use TkAgg backend for cleaner Ctrl+C exit
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
@@ -42,7 +43,9 @@ from mpl_toolkits.mplot3d import Axes3D
 signal.signal(signal.SIGINT, signal.SIG_DFL)
 
 
-def generate_grid_waypoints(min_x, max_x, min_y, max_y, min_z, max_z, step_x, step_y, step_z, grid_direction=0):
+def generate_grid_waypoints(
+    min_x, max_x, min_y, max_y, min_z, max_z, step_x, step_y, step_z, grid_direction=0
+):
     """Grid waypoints in boustrophedon (lawnmower) pattern.
 
     Matches EGOReplanFSM::generateGridWaypoints.
@@ -181,7 +184,9 @@ def generate_sin_waypoints(min_x, max_x, min_y, max_y, min_z, max_z, step_xy):
     return np.array(waypoints)
 
 
-def generate_spiral_waypoints(center_x, center_y, radius, num_segments, min_z, max_z, step_z):
+def generate_spiral_waypoints(
+    center_x, center_y, radius, num_segments, min_z, max_z, step_z
+):
     """Spiral waypoints around a circle center.
 
     Matches EGOReplanFSM::generateSpiralWaypoints (lines 284-319).
@@ -189,10 +194,12 @@ def generate_spiral_waypoints(center_x, center_y, radius, num_segments, min_z, m
     circle_points = []
     delta_angle = 2 * np.pi / num_segments
     for i in range(num_segments):
-        circle_points.append([
-            center_x + radius * np.cos(delta_angle * i),
-            center_y + radius * np.sin(delta_angle * i),
-        ])
+        circle_points.append(
+            [
+                center_x + radius * np.cos(delta_angle * i),
+                center_y + radius * np.sin(delta_angle * i),
+            ]
+        )
     circle_points = np.array(circle_points)
 
     waypoints = []
@@ -200,11 +207,13 @@ def generate_spiral_waypoints(center_x, center_y, radius, num_segments, min_z, m
     z = min_z
     while z < max_z:
         current_idx = circle_idx % len(circle_points)
-        waypoints.append([
-            circle_points[current_idx, 0],
-            circle_points[current_idx, 1],
-            z,
-        ])
+        waypoints.append(
+            [
+                circle_points[current_idx, 0],
+                circle_points[current_idx, 1],
+                z,
+            ]
+        )
         circle_idx += 1
         z += step_z
     return np.array(waypoints)
@@ -264,12 +273,56 @@ def plot_waypoints(waypoints, mode_name, title_extra=""):
     ox = mid_x - max_range * 0.9
     oy = mid_y - max_range * 0.9
     oz = mid_z - max_range * 0.9
-    ax.quiver(ox, oy, oz, arrow_len, 0, 0, color='red',   arrow_length_ratio=0.2, linewidth=2.5)
-    ax.quiver(ox, oy, oz, 0, arrow_len, 0, color='green', arrow_length_ratio=0.2, linewidth=2.5)
-    ax.quiver(ox, oy, oz, 0, 0, arrow_len, color='blue',  arrow_length_ratio=0.2, linewidth=2.5)
-    ax.text(ox + arrow_len * 1.15, oy, oz, 'X', color='red',   fontweight='bold', fontsize=12, ha='center', va='center')
-    ax.text(ox, oy + arrow_len * 1.15, oz, 'Y', color='green', fontweight='bold', fontsize=12, ha='center', va='center')
-    ax.text(ox, oy, oz + arrow_len * 1.15, 'Z', color='blue',  fontweight='bold', fontsize=12, ha='center', va='center')
+    ax.quiver(
+        ox, oy, oz, arrow_len, 0, 0, color="red", arrow_length_ratio=0.2, linewidth=2.5
+    )
+    ax.quiver(
+        ox,
+        oy,
+        oz,
+        0,
+        arrow_len,
+        0,
+        color="green",
+        arrow_length_ratio=0.2,
+        linewidth=2.5,
+    )
+    ax.quiver(
+        ox, oy, oz, 0, 0, arrow_len, color="blue", arrow_length_ratio=0.2, linewidth=2.5
+    )
+    ax.text(
+        ox + arrow_len * 1.15,
+        oy,
+        oz,
+        "X",
+        color="red",
+        fontweight="bold",
+        fontsize=12,
+        ha="center",
+        va="center",
+    )
+    ax.text(
+        ox,
+        oy + arrow_len * 1.15,
+        oz,
+        "Y",
+        color="green",
+        fontweight="bold",
+        fontsize=12,
+        ha="center",
+        va="center",
+    )
+    ax.text(
+        ox,
+        oy,
+        oz + arrow_len * 1.15,
+        "Z",
+        color="blue",
+        fontweight="bold",
+        fontsize=12,
+        ha="center",
+        va="center",
+    )
 
     # RViz default view: elev=30, azim=-60 (looking from front-right-up, Z up)
     ax.view_init(elev=30, azim=-60)
@@ -283,8 +336,11 @@ def main():
         description="Visualize EGO planner waypoint generation patterns"
     )
     parser.add_argument(
-        "--mode", type=int, required=True, choices=[0, 1, 2],
-        help="Distribution mode: 0=Grid, 1=Sinusoidal, 2=Spiral"
+        "--mode",
+        type=int,
+        required=True,
+        choices=[0, 1, 2],
+        help="Distribution mode: 0=Grid, 1=Sinusoidal, 2=Spiral",
     )
 
     # Common params
@@ -296,20 +352,44 @@ def main():
     parser.add_argument("--max-z", type=float, default=4.0)
 
     # Grid mode params
-    parser.add_argument("--step-x", type=float, default=1.0, help="Grid step X (mode 0)")
-    parser.add_argument("--step-y", type=float, default=1.0, help="Grid step Y (mode 0)")
-    parser.add_argument("--step-z", type=float, default=1.0, help="Grid/Spiral step Z (mode 0/2)")
-    parser.add_argument("--grid-direction", type=int, default=0, choices=[0, 1],
-                        help="Grid direction (mode 0): 0=Y-advance+X-return, 1=X-advance+Y-return")
+    parser.add_argument(
+        "--step-x", type=float, default=1.0, help="Grid step X (mode 0)"
+    )
+    parser.add_argument(
+        "--step-y", type=float, default=1.0, help="Grid step Y (mode 0)"
+    )
+    parser.add_argument(
+        "--step-z", type=float, default=1.0, help="Grid/Spiral step Z (mode 0/2)"
+    )
+    parser.add_argument(
+        "--grid-direction",
+        type=int,
+        default=0,
+        choices=[0, 1],
+        help="Grid direction (mode 0): 0=Y-advance+X-return, 1=X-advance+Y-return",
+    )
 
     # Sin mode params
-    parser.add_argument("--step-xy", type=float, default=1.0, help="Sin step XY (mode 1)")
+    parser.add_argument(
+        "--step-xy", type=float, default=1.0, help="Sin step XY (mode 1)"
+    )
 
     # Spiral mode params
-    parser.add_argument("--center-x", type=float, default=0.0, help="Spiral center X (mode 2)")
-    parser.add_argument("--center-y", type=float, default=0.0, help="Spiral center Y (mode 2)")
-    parser.add_argument("--radius", type=float, default=5.0, help="Spiral radius (mode 2)")
-    parser.add_argument("--num-segments", type=int, default=8, help="Spiral segments per circle (mode 2)")
+    parser.add_argument(
+        "--center-x", type=float, default=0.0, help="Spiral center X (mode 2)"
+    )
+    parser.add_argument(
+        "--center-y", type=float, default=0.0, help="Spiral center Y (mode 2)"
+    )
+    parser.add_argument(
+        "--radius", type=float, default=5.0, help="Spiral radius (mode 2)"
+    )
+    parser.add_argument(
+        "--num-segments",
+        type=int,
+        default=8,
+        help="Spiral segments per circle (mode 2)",
+    )
 
     args = parser.parse_args()
 
@@ -317,19 +397,35 @@ def main():
 
     if args.mode == 0:
         waypoints = generate_grid_waypoints(
-            args.min_x, args.max_x, args.min_y, args.max_y,
-            args.min_z, args.max_z, args.step_x, args.step_y, args.step_z,
-            args.grid_direction
+            args.min_x,
+            args.max_x,
+            args.min_y,
+            args.max_y,
+            args.min_z,
+            args.max_z,
+            args.step_x,
+            args.step_y,
+            args.step_z,
+            args.grid_direction,
         )
-        dir_label = "Y-advance + X-return" if args.grid_direction == 0 else "X-advance + Y-return"
+        dir_label = (
+            "Y-advance + X-return"
+            if args.grid_direction == 0
+            else "X-advance + Y-return"
+        )
         title_extra = (
             f"box=[{args.min_x},{args.max_x}]x[{args.min_y},{args.max_y}]x[{args.min_z},{args.max_z}], "
             f"step=[{args.step_x},{args.step_y},{args.step_z}], dir={dir_label}"
         )
     elif args.mode == 1:
         waypoints = generate_sin_waypoints(
-            args.min_x, args.max_x, args.min_y, args.max_y,
-            args.min_z, args.max_z, args.step_xy
+            args.min_x,
+            args.max_x,
+            args.min_y,
+            args.max_y,
+            args.min_z,
+            args.max_z,
+            args.step_xy,
         )
         title_extra = (
             f"box=[{args.min_x},{args.max_x}]x[{args.min_y},{args.max_y}]x[{args.min_z},{args.max_z}], "
@@ -337,8 +433,13 @@ def main():
         )
     elif args.mode == 2:
         waypoints = generate_spiral_waypoints(
-            args.center_x, args.center_y, args.radius,
-            args.num_segments, args.min_z, args.max_z, args.step_z
+            args.center_x,
+            args.center_y,
+            args.radius,
+            args.num_segments,
+            args.min_z,
+            args.max_z,
+            args.step_z,
         )
         title_extra = (
             f"center=({args.center_x},{args.center_y}), R={args.radius}, "
@@ -354,7 +455,7 @@ def main():
     try:
         plot_waypoints(waypoints, mode_names[args.mode], title_extra)
     except KeyboardInterrupt:
-        plt.close('all')
+        plt.close("all")
         sys.exit(0)
 
 

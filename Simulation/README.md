@@ -106,6 +106,8 @@ bash Simulation/start.sh full  # 完整 15 点网格，时限 600 秒
 
 默认场景为 `artifacts/forest_lio/route_125_155.json`，默认 bag 为 `~/bagfiles/yxb_20260208-104116.bag`。脚本检查这些文件，不会自动生成；不带模式参数启动等同于 `full`。
 
+`full`、`small`、`short` 默认启用 `world-frame`，Python `px4 run --stage forest` 入口也默认开启；多机森林仿真始终使用该链路。起飞前等待坐标初始化就绪。`hover` 保持独立飞控测试，不启用 LIO 坐标适配。
+
 默认打开 Gazebo + RViz，以 0.5 倍速运行；时限按仿真时间计算。成功后暂停并保留窗口，查看完成后关闭窗口或按 Ctrl+C，等待结果保存和进程清理。
 
 其他常用命令：
