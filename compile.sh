@@ -3,19 +3,19 @@
 declare -A results
 
 build() {
-  local module="$1"
-  shift
-  echo ""
-  echo "========================================"
-  echo ">> Building: $module"
-  echo "========================================"
-  if "$@"; then
-    results["$module"]="OK"
-    echo ">> $module: OK"
-  else
-    results["$module"]="FAILED"
-    echo ">> $module: FAILED"
-  fi
+    local module="$1"
+    shift
+    echo ""
+    echo "========================================"
+    echo ">> Building: $module"
+    echo "========================================"
+    if "$@"; then
+        results["$module"]="OK"
+        echo ">> $module: OK"
+    else
+        results["$module"]="FAILED"
+        echo ">> $module: FAILED"
+    fi
 }
 
 build "mavros"            catkin_make --source Experiment/mavros --build build/mavros_bringup
@@ -33,19 +33,19 @@ echo "         BUILD SUMMARY"
 echo "============================================"
 failed=0
 for module in "${!results[@]}"; do
-  status="${results[$module]}"
-  if [[ "$status" == "OK" ]]; then
-    printf "  [OK]   %-25s\n" "$module"
-  else
-    printf "  [FAIL] %-25s\n" "$module"
-    ((failed++))
-  fi
+    status="${results[$module]}"
+    if [[ "$status" == "OK" ]]; then
+        printf "  [OK]   %-25s\n" "$module"
+    else
+        printf "  [FAIL] %-25s\n" "$module"
+        ((failed++))
+    fi
 done
 echo "============================================"
 if [[ $failed -eq 0 ]]; then
-  echo "  All modules built successfully."
+    echo "  All modules built successfully."
 else
-  echo "  $failed module(s) failed."
+    echo "  $failed module(s) failed."
 fi
 echo "============================================"
 exit $failed

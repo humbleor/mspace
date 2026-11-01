@@ -1,6 +1,5 @@
 # Mspace
 
-
 **Mspace 是面向森林林冠下 GNSS 拒止环境的无人机自主导航项目，支持单机与多机协同。** 项目基于 ROS Noetic，将 Fast-LIO2 激光雷达惯性定位与建图、EGO-Planner 路径规划与轨迹优化，以及 MAVROS/PX4 控制接口集成到同一 catkin 工作区。
 
 项目提供 Livox Mid-360、Ouster 雷达相关配置，包含森林点云场景仿真、雷达机间检测、多机通信桥接和实机启动脚本。Intel RealSense 相机用于数据记录相关场景。具体功能与运行条件以代码和配置为准。
@@ -17,17 +16,17 @@
 
 导航以 GNSS 不可用为应用前提，依靠激光雷达与惯性信息提供定位。多机运行还需配置各机编号、初始位置、坐标系及通信网络；各机独立 LIO 坐标不能直接视为统一全局坐标。
 
-| 目录                                              | 功能 / 主要 ROS 包                           |
-| ------------------------------------------------- | -------------------------------------------- |
-| `Modules/common/msgs/`                          | 共享消息，`prometheus_msgs`                |
-| `Modules/fast_lio2/`                            | 激光雷达惯性里程计，`fast_lio`             |
+| 目录                                            | 功能 / 主要 ROS 包                           |
+| ----------------------------------------------- | -------------------------------------------- |
+| `Modules/common/msgs/`                          | 共享消息，`prometheus_msgs`                  |
+| `Modules/fast_lio2/`                            | 激光雷达惯性里程计，`fast_lio`               |
 | `Modules/ego_planner_swarm/`                    | 规划、环境表示、检测、通信与仿真，包含多个包 |
-| `Modules/ego_planner_swarm/plan_manage/`        | 规划管理及启动配置，`ego_planner`          |
-| `Modules/ego_planner_swarm/drone_detect_lidar/` | 雷达机间检测，`drone_detect_lidar`         |
-| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/`  | 多机消息桥接，`rosmsg_tcp_bridge`          |
-| `Modules/swarm_control/`                        | 控制与地面站，`prometheus_swarm_control`   |
-| `Modules/realsense_ros/`                        | RealSense 驱动，包含`realsense2_camera`    |
-| `Experiment/mavros/`                            | MAVROS 启动配置，`mavros_bringup`          |
+| `Modules/ego_planner_swarm/plan_manage/`        | 规划管理及启动配置，`ego_planner`            |
+| `Modules/ego_planner_swarm/drone_detect_lidar/` | 雷达机间检测，`drone_detect_lidar`           |
+| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/`  | 多机消息桥接，`rosmsg_tcp_bridge`            |
+| `Modules/swarm_control/`                        | 控制与地面站，`prometheus_swarm_control`     |
+| `Modules/realsense_ros/`                        | RealSense 驱动，包含`realsense2_camera`      |
+| `Experiment/mavros/`                            | MAVROS 启动配置，`mavros_bringup`            |
 
 `roslaunch` 和 `rosrun` 使用 ROS 包名。例如规划模块目录为 `ego_planner_swarm`，启动时使用包名 `ego_planner`。
 
@@ -140,7 +139,6 @@ CHECK_ONLY=1 ./topiclistOS0.sh   # 先看会录哪些话题，不写文件
 正则按整名匹配，同时兼容旧命名与 world 模式：`/livox/lidar_*`、`/uav1/livox/lidar_*`、`/ouster/points`、`/os_cloud_node_1/points`，以及 `/camera`、`/d400` 的压缩图。雷达话题换了名字或前缀时，改正则为上；相机用 `camera:=uav1_camera` 启动的话，把 `uavN_camera` 加进去。
 
 回放注意：world 模式录出的 bag 里 frame 是 `uavX/lio_init` / `uavX/fcu_local`，要用 `enable_world_frame:=true` 的 launch 回放。
-
 
 ## 7. 森林传感器与导航闭环仿真
 

@@ -49,7 +49,7 @@ cleanup() {
         kill $UAV2_PID 2>/dev/null || true
         # 同时杀死远程的roslaunch进程
         sshpass -p "$PASSWORD" ssh -o StrictHostKeyChecking=no ${UAV2_HOSTNAME}@${UAV2_IP} \
-            "pkill -f 'roslaunch mavros_bringup px4_mavros_swarm_basic.launch enable_world_frame:=true'" 2>/dev/null || true
+        "pkill -f 'roslaunch mavros_bringup px4_mavros_swarm_basic.launch enable_world_frame:=true'" 2>/dev/null || true
     fi
     
     # 杀死UAV1的MAVROS进程
@@ -153,7 +153,7 @@ start_uav2() {
             echo '等待ROS Master...'
             sleep 2
         done
-        roslaunch mavros_bringup px4_mavros_swarm_basic.launch enable_world_frame:=true uav_id:=2 gcs_ip:=${GCS_IP} tfmini_id:=${TFMINI_ID_UAV2}" &
+    roslaunch mavros_bringup px4_mavros_swarm_basic.launch enable_world_frame:=true uav_id:=2 gcs_ip:=${GCS_IP} tfmini_id:=${TFMINI_ID_UAV2}" &
     UAV2_PID=$!
     
     log_info "UAV2启动命令已发送 (PID: $UAV2_PID)"

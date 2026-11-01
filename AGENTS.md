@@ -38,23 +38,23 @@ catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 
 `roslaunch` / `rosrun` 使用 `package.xml` 中的包名，不能直接使用模块目录名。
 
-| 路径 | ROS 包名或说明 | 用途 |
-| --- | --- | --- |
-| `Modules/common/msgs/` | `prometheus_msgs` | 共享消息 |
-| `Modules/fast_lio2/` | `fast_lio` | 激光雷达惯性里程计与建图 |
-| `Modules/ego_planner_swarm/` | 包含多个包 | 规划、机间检测、通信与仿真 |
-| `Modules/ego_planner_swarm/plan_manage/` | `ego_planner` | 规划管理与启动配置 |
-| `Modules/ego_planner_swarm/drone_detect_lidar/` | `drone_detect_lidar` | 雷达机间检测 |
-| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/` | `rosmsg_tcp_bridge` | 多机消息桥接 |
-| `Modules/swarm_control/` | `prometheus_swarm_control` | 控制与地面站 |
-| `Modules/realsense_ros/` | 包含 `realsense2_camera` 等包 | 相机驱动 |
-| `Experiment/mavros/` | `mavros_bringup` | PX4 MAVROS 启动配置 |
+| 路径                                            | ROS 包名或说明                | 用途                       |
+| ----------------------------------------------- | ----------------------------- | -------------------------- |
+| `Modules/common/msgs/`                          | `prometheus_msgs`             | 共享消息                   |
+| `Modules/fast_lio2/`                            | `fast_lio`                    | 激光雷达惯性里程计与建图   |
+| `Modules/ego_planner_swarm/`                    | 包含多个包                    | 规划、机间检测、通信与仿真 |
+| `Modules/ego_planner_swarm/plan_manage/`        | `ego_planner`                 | 规划管理与启动配置         |
+| `Modules/ego_planner_swarm/drone_detect_lidar/` | `drone_detect_lidar`          | 雷达机间检测               |
+| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/`  | `rosmsg_tcp_bridge`           | 多机消息桥接               |
+| `Modules/swarm_control/`                        | `prometheus_swarm_control`    | 控制与地面站               |
+| `Modules/realsense_ros/`                        | 包含 `realsense2_camera` 等包 | 相机驱动                   |
+| `Experiment/mavros/`                            | `mavros_bringup`              | PX4 MAVROS 启动配置        |
 
 规划子包直接位于 `Modules/ego_planner_swarm/` 下，不存在原说明中的 `src/planner/` 层级：
 
 - `plan_manage`：高层规划管理、launch 与参数配置。
 - `bspline_opt`：B 样条轨迹优化。
-- `path_searching`：A* 路径搜索。
+- `path_searching`：A\* 路径搜索。
 - `plan_env`：栅格地图与射线投射等环境表示。
 - `traj_utils`：轨迹工具。
 - `drone_detect_lidar`：当前参与构建的雷达机间检测。

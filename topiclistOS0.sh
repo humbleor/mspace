@@ -12,9 +12,9 @@ TOPICS='^(/uav[0-9]+)?/livox/(lidar|imu)(_[0-9_]+)?$|^/(ouster|os_cloud_node[0-9
 # 预检：先看会录到哪些话题，避免录出空包
 matched=$(rostopic list 2>/dev/null | grep -E "$TOPICS")
 if [ -z "$matched" ]; then
-  echo "没有话题匹配，检查驱动是否启动、话题是否在 /uavX 命名空间下：" >&2
-  rostopic list 2>/dev/null | head -40 >&2
-  exit 1
+    echo "没有话题匹配，检查驱动是否启动、话题是否在 /uavX 命名空间下：" >&2
+    rostopic list 2>/dev/null | head -40 >&2
+    exit 1
 fi
 echo "$matched"
 [ "${CHECK_ONLY:-0}" = "1" ] && exit 0
