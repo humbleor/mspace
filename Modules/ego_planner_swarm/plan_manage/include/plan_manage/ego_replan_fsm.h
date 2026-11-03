@@ -8,6 +8,8 @@
 #include <sensor_msgs/Imu.h>
 #include <ros/ros.h>
 #include <std_msgs/Empty.h>
+#include <std_msgs/Bool.h>
+#include <std_msgs/Header.h>
 #include <vector>
 #include <visualization_msgs/Marker.h>
 
@@ -69,9 +71,17 @@ namespace ego_planner
     double emergency_time_;
     bool flag_realworld_experiment_;
     bool odom_twist_in_body_ = false;
+    void updateGridApproach();
+    bool level_grid_approach_ = false; // Complete the initial approach before looking into cruise.
     bool strict_waypoint_tracking_; // Confirm each mission point from odometry.
     bool enable_fail_safe_;
     bool bridge_mode_ = false;
+    bool mission_gate_ = false, mission_active_ = false, mission_initialized_ = false;
+    ros::Time odom_stamp_, mission_start_time_, mission_stop_time_;
+    ros::Subscriber mission_start_sub_, mission_stop_sub_;
+    ros::Publisher mission_ready_pub_;
+    void missionStartCallback(const geometry_msgs::PoseStampedConstPtr &msg);
+    void missionStopCallback(const std_msgs::HeaderConstPtr &msg);
 
     /* planning data */
     bool have_trigger_, have_target_, have_odom_, have_new_target_, have_recv_pre_agent_;

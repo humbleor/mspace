@@ -2,7 +2,8 @@
 #include "nav_msgs/Odometry.h"
 #include "traj_utils/Bspline.h"
 #include "quadrotor_msgs/PositionCommand.h"
-#include "std_msgs/Empty.h"
+#include <std_msgs/Header.h>
+#include <geometry_msgs/PoseStamped.h>
 #include "visualization_msgs/Marker.h"
 #include <ros/ros.h>
 
@@ -23,9 +24,38 @@ int traj_id_;
 // yaw control
 double last_yaw_, last_yaw_dot_;
 double time_forward_;
+bool mission_gate_ = false, mission_active_ = false;
+ros::Time mission_start_, mission_stop_, last_cmd_time_;
+
+void missionStop(const std_msgs::HeaderConstPtr &m)
+{
+  if (!mission_gate_ || m->stamp < mission_start_ || m->stamp <= mission_stop_) return;
+  mission_stop_ = m->stamp;
+  mission_active_ = false; receive_traj_ = false; traj_.clear();
+}
+void missionStart(const geometry_msgs::PoseStampedConstPtr &m)
+{
+  const double age = (ros::Time::now()-m->header.stamp).toSec();
+  const auto &q = m->pose.orientation;
+  const double n = q.w*q.w+q.x*q.x+q.y*q.y+q.z*q.z;
+  if (!mission_gate_ || m->header.stamp.isZero() || m->header.stamp <= mission_stop_ || age < -.1 || age > 1. ||
+      m->header.frame_id != "world" || !std::isfinite(n) || std::abs(n-1.)>.02 ||
+      (!mission_start_.isZero() && m->header.stamp<=mission_start_)) return;
+  mission_active_ = true; receive_traj_ = false; traj_.clear();
+  mission_start_ = m->header.stamp; last_cmd_time_ = ros::Time::now();
+  last_yaw_ = std::atan2(2*(q.w*q.z+q.x*q.y), 1-2*(q.y*q.y+q.z*q.z));
+  last_yaw_dot_ = 0.;
+}
 
 void bsplineCallback(traj_utils::BsplineConstPtr msg)
 {
+  if (mission_gate_ && (!mission_active_ || msg->start_time < mission_start_ ||
+      (receive_traj_ && msg->start_time < start_time_))) return;
+  if (msg->order != 3 || msg->pos_pts.size() < 4 || msg->knots.size() != msg->pos_pts.size()+4) return;
+  for (size_t i=0;i<msg->knots.size();++i)
+    if (!std::isfinite(msg->knots[i]) || (i && msg->knots[i] < msg->knots[i-1])) return;
+  for (const auto &p:msg->pos_pts)
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) return;
   // parse pos traj
 
   Eigen::MatrixXd pos_pts(3, msg->pos_pts.size());
@@ -65,6 +95,7 @@ void bsplineCallback(traj_utils::BsplineConstPtr msg)
 
   traj_duration_ = traj_[0].getTimeSum();
 
+  if (!receive_traj_) last_cmd_time_ = ros::Time::now();
   receive_traj_ = true;
 }
 
@@ -78,7 +109,7 @@ std::pair<double, double> calculate_yaw(double t_cur, Eigen::Vector3d &pos, ros:
   double yawdot = 0;
 
   Eigen::Vector3d dir = t_cur + time_forward_ <= traj_duration_ ? traj_[0].evaluateDeBoorT(t_cur + time_forward_) - pos : traj_[0].evaluateDeBoorT(traj_duration_) - pos;
-  double yaw_temp = dir.norm() > 0.1 ? atan2(dir(1), dir(0)) : last_yaw_;
+  double yaw_temp = std::hypot(dir.x(), dir.y()) > 0.1 ? atan2(dir(1), dir(0)) : last_yaw_;
   double max_yaw_change = YAW_DOT_MAX_PER_SEC * (time_now - time_last).toSec();
   if (yaw_temp - last_yaw_ > PI)
   {
@@ -172,7 +203,8 @@ void cmdCallback(const ros::TimerEvent &e)
   Eigen::Vector3d pos(Eigen::Vector3d::Zero()), vel(Eigen::Vector3d::Zero()), acc(Eigen::Vector3d::Zero()), pos_f;
   std::pair<double, double> yaw_yawdot(0, 0);
 
-  static ros::Time time_last = ros::Time::now();
+  if (last_cmd_time_.isZero()) last_cmd_time_ = time_now;
+  ros::Time &time_last = last_cmd_time_;
   if (t_cur < traj_duration_ && t_cur >= 0.0)
   {
     pos = traj_[0].evaluateDeBoorT(t_cur);
@@ -200,7 +232,8 @@ void cmdCallback(const ros::TimerEvent &e)
   }
   else
   {
-    cout << "[Traj server]: invalid time." << endl;
+    last_cmd_time_ = time_now;
+    return; // A future spline must not emit a zero-position command.
   }
   time_last = time_now;
 
@@ -235,6 +268,14 @@ int main(int argc, char **argv)
   // ros::NodeHandle node;
   ros::NodeHandle nh("~");
 
+  nh.param("mission_gate", mission_gate_, false);
+  int uav_id; nh.param("uav_id", uav_id, 1);
+  ros::Subscriber mission_start_sub, mission_stop_sub;
+  if (mission_gate_) {
+    const std::string prefix = "/uav"+std::to_string(uav_id)+"/planning/";
+    mission_start_sub = nh.subscribe(prefix+"mission_start",1,missionStart);
+    mission_stop_sub = nh.subscribe(prefix+"mission_stop",1,missionStop);
+  }
   ros::Subscriber bspline_sub = nh.subscribe("planning/bspline", 10, bsplineCallback);
 
   pos_cmd_pub = nh.advertise<quadrotor_msgs::PositionCommand>("/position_cmd", 50);

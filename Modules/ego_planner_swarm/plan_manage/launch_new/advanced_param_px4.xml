@@ -31,6 +31,7 @@
   
   <arg name="uav_id"/>
   <arg name="use_bridge" default="false"/>
+  <arg name="mission_gate" default="false"/>
 
   <arg name="step_X"/>
   <arg name="step_Y"/>
@@ -73,7 +74,8 @@
     <param name="fsm/planning_horizon" value="$(arg planning_horizon)" type="double"/> <!--always set to 1.5 times grater than sensing horizen-->
     <param name="fsm/planning_horizen_time" value="3" type="double"/>
     <param name="fsm/emergency_time_" value="1.0" type="double"/>
-    <param name="fsm/realworld_experiment" value="false"/>
+    <param name="fsm/realworld_experiment" value="$(arg mission_gate)"/>
+    <param name="fsm/mission_gate" value="$(arg mission_gate)"/>
     <param name="fsm/fail_safe" value="true"/>
 
     <param name="fsm/step_X" value="$(arg step_X)" type="double"/>

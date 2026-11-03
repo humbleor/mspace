@@ -1,6 +1,8 @@
 // #include <fstream>
 #include <plan_manage/planner_manager.h>
 #include <thread>
+#include <algorithm>
+#include <cmath>
 #include "visualization_msgs/Marker.h" // zx-todo
 
 namespace ego_planner
@@ -379,13 +381,21 @@ namespace ego_planner
   }
 
   bool EGOPlannerManager::planGlobalTrajWaypoints(const Eigen::Vector3d &start_pos, const Eigen::Vector3d &start_vel, const Eigen::Vector3d &start_acc,
-                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc)
+                                                  const std::vector<Eigen::Vector3d> &waypoints, const Eigen::Vector3d &end_vel, const Eigen::Vector3d &end_acc,
+                                                  bool separate_level_start)
   {
 
-    // generate global reference trajectory
+    if (waypoints.empty() || !std::isfinite(pp_.max_vel_) || pp_.max_vel_ <= 0.) return false;
+    const bool split = separate_level_start && waypoints.size() > 1 &&
+      std::all_of(waypoints.begin(), waypoints.end(), [&](const Eigen::Vector3d &p) {
+        return std::abs(p.z()-waypoints.front().z()) < 1e-6;
+      });
+    const Eigen::Vector3d zero = Eigen::Vector3d::Zero();
+    const Eigen::Vector3d initial_vel = split ? zero : start_vel;
+    const Eigen::Vector3d initial_acc = split ? zero : start_acc;
 
     vector<Eigen::Vector3d> points;
-    points.push_back(start_pos);
+    if (!split) points.push_back(start_pos);
 
     for (size_t wp_i = 0; wp_i < waypoints.size(); wp_i++)
     {
@@ -393,7 +403,7 @@ namespace ego_planner
     }
 
     double total_len = 0;
-    total_len += (start_pos - waypoints[0]).norm();
+    if (!split) total_len += (start_pos - waypoints[0]).norm();
     for (size_t i = 0; i < waypoints.size() - 1; i++)
     {
       total_len += (waypoints[i + 1] - waypoints[i]).norm();
@@ -434,7 +444,6 @@ namespace ego_planner
     for (int i = 0; i < pt_num; ++i)
       pos.col(i) = inter_points[i];
 
-    Eigen::Vector3d zero(0, 0, 0);
     Eigen::VectorXd time(pt_num - 1);
     for (int i = 0; i < pt_num - 1; ++i)
     {
@@ -446,11 +455,23 @@ namespace ego_planner
 
     PolynomialTraj gl_traj;
     if (pos.cols() >= 3)
-      gl_traj = PolynomialTraj::minSnapTraj(pos, start_vel, end_vel, start_acc, end_acc, time);
+      gl_traj = PolynomialTraj::minSnapTraj(pos, initial_vel, end_vel, initial_acc, end_acc, time);
     else if (pos.cols() == 2)
-      gl_traj = PolynomialTraj::one_segment_traj_gen(start_pos, start_vel, start_acc, pos.col(1), end_vel, end_acc, time(0));
+      gl_traj = PolynomialTraj::one_segment_traj_gen(pos.col(0), initial_vel, initial_acc, pos.col(1), end_vel, end_acc, time(0));
     else
       return false;
+
+    if (split)
+    {
+      // Stop at the first grid point so climb derivatives cannot bend the level cruise.
+      const double approach_time = std::max(1., 2.*(waypoints.front()-start_pos).norm()/pp_.max_vel_);
+      PolynomialTraj joined = PolynomialTraj::one_segment_traj_gen(
+        start_pos, start_vel, start_acc, waypoints.front(), zero, zero, approach_time);
+      const auto times = gl_traj.getTimes();
+      const auto x = gl_traj.getCoef(0), y = gl_traj.getCoef(1), z = gl_traj.getCoef(2);
+      for (size_t i=0; i<times.size(); ++i) joined.addSegment(x[i],y[i],z[i],times[i]);
+      gl_traj = joined;
+    }
 
     auto time_now = ros::Time::now();
     global_data_.setGlobalTraj(gl_traj, time_now);

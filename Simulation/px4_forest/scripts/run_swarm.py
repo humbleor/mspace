@@ -63,6 +63,8 @@ class Aircraft:
     takeoff: bool = False
     armed_at: float = None
     trigger_at: float = None
+    mission_state: str = "waiting"
+    mission_events: list = field(default_factory=list)
     settled_at: float = None
     last_service: float = 0.0
     frame: int = 0
@@ -259,7 +261,6 @@ def main(argv=None):
                 swarm_num=len(specs),
                 initial=v.initial,
                 sensor_prefix=v.sensor_prefix,
-                trigger_topic=v.namespace + "/traj_start_trigger",
             )
             write_json(d / "module_alignment.json", c.module_alignment)
             gazebo = prepare_model(
@@ -424,7 +425,7 @@ def main(argv=None):
         from sensor_msgs.msg import Imu, PointCloud2
         from sensor_msgs import point_cloud2
         from geometry_msgs.msg import PoseStamped, Pose
-        from std_msgs.msg import Header, Bool
+        from std_msgs.msg import Header, Bool, String
         from visualization_msgs.msg import Marker, MarkerArray
         from mavros_msgs.msg import State, PositionTarget
         from mavros_msgs.srv import SetMode, CommandBool, ParamGet
@@ -560,8 +561,15 @@ def main(argv=None):
                 c.station_pub = rospy.Publisher(
                     ns + "/prometheus/swarm_command", SwarmCommand, queue_size=10
                 )
-                c.trigger_pub = rospy.Publisher(
-                    ns + "/traj_start_trigger", PoseStamped, queue_size=1, latch=True
+                def mission_cb(m, c=c):
+                    c.mission_state = m.data
+                    c.mission_events.append([rospy.Time.now().to_sec(), m.data])
+                    if m.data == "planning" and c.trigger_at is None:
+                        c.trigger_at = rospy.Time.now().to_sec()
+                        c.arrivals.append([0, c.trigger_at])
+                        print(c.spec.name + ": shared OFFBOARD gate started EGO", flush=True)
+                c.mission_sub = rospy.Subscriber(
+                    v.namespace + "/planning/mission_state", String, mission_cb
                 )
             else:
                 c.setpoint_pub = rospy.Publisher(
@@ -863,29 +871,9 @@ def main(argv=None):
             if a.stage == "hover" and now - last_hover >= 0.018:
                 last_hover = now
             if a.stage == "forest":
-                can_trigger = all_ready(
-                    c.armed_at is not None
-                    and now - c.armed_at > 4
-                    and c.world
-                    and abs(c.world[-1][3] - 1.2) < 0.2
-                    and c.trigger_pub.get_num_connections() > 0
-                    for c in aircraft
-                )
-                if can_trigger:
-                    for c in aircraft:
-                        if c.trigger_at is None:
-                            c.trigger_pub.publish(
-                                PoseStamped(
-                                    header=Header(
-                                        stamp=rospy.Time.now(), frame_id="world"
-                                    )
-                                )
-                            )
-                            c.trigger_at = now
-                            c.arrivals.append([0, now])
-                            print(
-                                c.spec.name + ": native EGO task triggered", flush=True
-                            )
+                for c in aircraft:
+                    if c.mission_state == "blocked":
+                        raise RuntimeError(c.spec.name + ": shared mission handover blocked")
                 for c in aircraft:
                     if c.trigger_at is not None and c.world:
                         index = len(c.arrivals)
@@ -1153,6 +1141,7 @@ def main(argv=None):
                 "accepted_goals": c.accepted,
                 "arrivals": c.arrivals,
                 "trigger_sim_s": c.trigger_at,
+                "mission_handover_events": c.mission_events,
                 "goal_error_m": goal_error,
                 "frame_ready_sim_s": c.ready_at,
                 "lidar_frames": c.frame,

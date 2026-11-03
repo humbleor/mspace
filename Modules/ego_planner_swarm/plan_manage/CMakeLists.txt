@@ -56,6 +56,8 @@ target_link_libraries(traj_server ${catkin_LIBRARIES})
 
 
 if(CATKIN_ENABLE_TESTING)
+  add_executable(grid_trajectory_test test/grid_trajectory_test.cpp src/planner_manager.cpp)
+  target_link_libraries(grid_trajectory_test ${catkin_LIBRARIES})
   add_executable(bridge_chain_test test/bridge_chain_test.cpp src/ego_replan_fsm.cpp src/planner_manager.cpp)
   target_link_libraries(bridge_chain_test ${catkin_LIBRARIES})
 endif()

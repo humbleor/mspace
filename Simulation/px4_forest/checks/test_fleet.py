@@ -201,7 +201,7 @@ class FleetTests(unittest.TestCase):
             for row, y in zip(manifest["vehicles"], (0, 5)):
                 directory = out / ("uav%d" % row["uav_id"])
                 self.assertEqual(row["initial"], [0, y, 0, 0])
-                self.assertEqual(len(row["goals"]), 10)
+                self.assertEqual(len(row["goals"]), 6)  # Current example: x=0,4,8 and two y rows.
                 self.assertEqual(row["goals"][0], [0, y, 2])
                 route = json.loads((directory / "route_goals.json").read_text())
                 self.assertEqual(route["generator"], "generateWps")
@@ -210,7 +210,7 @@ class FleetTests(unittest.TestCase):
                 info = json.loads((directory / "module_alignment.json").read_text())
                 self.assertEqual(info["flight_type"], 3)
                 self.assertEqual(float(info["overrides"]["box_min_y"]), y)
-                self.assertEqual(float(info["overrides"]["step_X"]), 5)
+                self.assertEqual(float(info["overrides"]["step_X"]), 4)
                 planner = ET.parse(directory / "planner_modules.launch").getroot()
                 params = {e.get("name"): e.get("value") for e in planner.findall("param")}
                 prefix = "/uav_%d_ego_planner_node/fsm/" % row["uav_id"]
@@ -278,7 +278,6 @@ class FleetTests(unittest.TestCase):
                     swarm_num=3,
                     initial=v.initial,
                     sensor_prefix=v.sensor_prefix,
-                    trigger_topic=v.namespace + "/traj_start_trigger",
                 )
                 wrapper = ET.parse(out / "modules.launch").getroot()
                 planner = ET.parse(out / "planner_modules.launch").getroot()
@@ -305,11 +304,11 @@ class FleetTests(unittest.TestCase):
                 )
                 self.assertIsNotNone(height)
                 self.assertEqual(float(height.get("value")), 1.2)
-                trigger = planner.find("remap[@from='/traj_start_trigger']")
-                self.assertLess(
-                    list(planner).index(trigger),
-                    list(planner).index(planner.find("include")),
-                )
+                self.assertIsNone(planner.find("remap[@from='/traj_start_trigger']"))
+                self.assertEqual(info["mission_handover"], "shared_offboard_gate")
+                control = next(e for e in wrapper.findall("include") if "ego_swarm_control" in e.get("file"))
+                self.assertEqual(control.find("arg[@name='enable_mission_gate']").get("value"), "true")
+                self.assertEqual(planner.find("arg[@name='enable_mission_gate']").get("default"), "true")
                 self.assertTrue(
                     any(
                         e.get("name")

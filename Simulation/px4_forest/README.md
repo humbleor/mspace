@@ -125,3 +125,11 @@ python3 Simulation/run.py px4 run --stage forest \
 ## 多机共享世界
 
 新增 `python3 Simulation/run.py px4 swarm --fleet CONFIG --output RUN`，以及加载环境的 `bash Simulation/start.sh swarm ...`。配置驱动 N 个独立 PX4、模拟雷达/IMU 和导航链路，共享森林与时钟；双机/三机示例和验收限制见 [多机说明](docs/fleet.md)。原 `px4 run` 单机入口继续保留。
+
+## OFFBOARD 任务交接
+
+单机和多机运行器均使用实机共享的任务门控，控制与规划 launch 同时启用 `enable_mission_gate`。运行器保留原生自动 OFFBOARD 起飞，门控等待爬升稳定后捕获保持位姿，再显式启动 EGO；不再独立发布延时 `/traj_start_trigger`。任务航向仍按 EGO 轨迹前方生成。
+
+单机结果的 `mission_handover_events`、多机各机结果的同名事件记录 waiting → holding → planning → running；blocked 会使验证失败。详见 [交接接口与中断行为](../../Modules/swarm_control/MISSION_HANDOVER.md)。自动起飞仿真不等于人工 Position 起飞交接或实机航向问题已验证。
+
+等高网格的全局参考已采用“接管状态到首点减速、再接网格巡航”的两段拼接，详见上述交接说明。该行为来自共享规划模块，并非仿真专用高度修正，也不构成全程限高。

@@ -107,7 +107,6 @@ def prepare_modules(
     swarm_num=1,
     initial=(0.0, 0.0, 0.0, 0.0),
     sensor_prefix="/sim",
-    trigger_topic=None,
 ):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root, out = Path(root), Path(out)
@@ -149,6 +148,7 @@ def prepare_modules(
         "uav_id": str(uav_id),
         "swarm_num": str(swarm_num),
         "input_source": "4",
+        "enable_mission_gate": "true",
     }
     if world_frame:
         control_args.update(
@@ -185,13 +185,6 @@ def prepare_modules(
         for node in planner.getroot().findall("node"):
             if node.get("type") == "odom_visualization":
                 node.find("param[@name='tf45']").set("value", "false")
-    if trigger_topic:
-        planner.getroot().insert(
-            0,
-            ET.Element(
-                "remap", attrib={"from": "/traj_start_trigger", "to": trigger_topic}
-            ),
-        )
     if world_frame:
         for e in planner.getroot().findall("arg"):
             if e.get("name") == "enable_world_frame":
@@ -269,6 +262,7 @@ def prepare_modules(
         "control_template": "Modules/swarm_control/launch/ego_swarm_control.launch",
         "flight_type": 3 if grid else 2,
         "control_takeoff_height": 1.2,
+        "mission_handover": "shared_offboard_gate",
         "planner_odom": (
             f"/uav{uav_id}/world/odom"
             if world_frame
@@ -291,7 +285,7 @@ def prepare_modules(
             else {}
         ),
         "overrides": dict(
-            overrides, realworld_experiment=True, strict_waypoint_tracking=False
+            overrides, realworld_experiment=True, mission_gate=True, strict_waypoint_tracking=False
         ),
         "algorithms_modified": True,
         "simulation_map_layout": layout,

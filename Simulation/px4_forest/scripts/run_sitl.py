@@ -468,7 +468,7 @@ def main():
         from livox_ros_driver2.msg import CustomMsg
         from mavros_msgs.msg import State, PositionTarget
         from mavros_msgs.srv import SetMode, CommandBool, ParamGet
-        from std_msgs.msg import Header, Bool
+        from std_msgs.msg import Header, Bool, String
         from prometheus_msgs.msg import SwarmCommand
         from visualization_msgs.msg import Marker
         from gazebo_msgs.msg import ContactsState
@@ -493,13 +493,15 @@ def main():
             if a.stage == "forest"
             else None
         )
-        trigger_pub = (
-            rospy.Publisher(
-                "/traj_start_trigger", PoseStamped, queue_size=1, latch=True
-            )
-            if a.stage == "forest"
-            else None
-        )
+        mission_events = []
+        def mission_cb(m):
+            nonlocal trigger_sent
+            mission_events.append([rospy.Time.now().to_sec(), m.data])
+            if m.data == "planning" and not trigger_sent:
+                trigger_sent = True
+                arrivals.append([0, rospy.Time.now().to_sec()])
+                print("Shared OFFBOARD gate started the EGO task.", flush=True)
+        mission_sub = rospy.Subscriber("/uav1/planning/mission_state", String, mission_cb)
 
         def station_command(mode, yaw=0):
             nonlocal station_id
@@ -916,6 +918,8 @@ def main():
                     target.position.z = a.takeoff_height
                 setpoint_pub.publish(target)
                 last_setpoint = now
+            if a.stage == "forest" and mission_events and mission_events[-1][1] == "blocked":
+                raise RuntimeError("Shared mission handover blocked; see navigation log")
             ready = (
                 now - start_sim > 8
                 and (a.stage == "hover" or len(lio) > 25)
@@ -958,24 +962,6 @@ def main():
                         if finished is None:
                             finished = now
                 elif lio:
-                    if (
-                        not trigger_sent
-                        and takeoff_sent
-                        and now - armed_at > 4
-                        and abs(lio[-1][3] - 1.2) < 0.2
-                        and trigger_pub.get_num_connections()
-                    ):
-                        arrivals.append([0, now])
-                        trigger_pub.publish(
-                            PoseStamped(
-                                header=Header(stamp=rospy.Time.now(), frame_id="world")
-                            )
-                        )
-                        trigger_sent = True
-                        print(
-                            "Native EGO task triggered; station yields to module control.",
-                            flush=True,
-                        )
                     if trigger_sent:
                         index = len(arrivals)
                         if (
@@ -1342,6 +1328,7 @@ def main():
                 "accepted_goals": accepted_goals,
                 "module_alignment": module_info,
                 "native_trigger_sent": trigger_sent,
+                "mission_handover_events": mission_events,
                 "arrivals": arrivals,
                 "armed_at_sim_s": armed_at,
                 "state_history": state_history,

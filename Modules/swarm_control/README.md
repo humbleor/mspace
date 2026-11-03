@@ -108,7 +108,7 @@
 | `uav_id` | int | 0 | 无人机编号 |
 | `control_flag` | int | 0 | 0=TRAJECTORY(全量轨迹), 1=XYZ_POS(纯位置), 2=XY_VEL_Z_POS |
 
-> **注意:** 当 EGO 发布的速度为 0（到达目标点）时，该帧不会转为控制指令（`get_ego_traj=false`），防止飞控接收到零速指令导致悬停抖动。
+> 有效的零速度轨迹帧也会转发，用于目标点保持。实机默认启用 OFFBOARD 交接门控，见 [交接说明](MISSION_HANDOVER.md)。
 
 ### 3. `swarm_controller` — 核心飞行控制器
 
@@ -251,7 +251,7 @@ MAVROS → PX4 FlightTaskOffboard → 混控器 → 电机
 
 1. **traj_server 发布** `PositionCommand` 到 `/position_cmd`，launch 文件中通过 remap 映射为 `/uavX/planning/ego/traj_cmd`，ego_traj_to_cmd 通过此话题接收轨迹。
 
-2. **零速检测**: ego_traj_to_cmd 检查 `velocity.x == 0` 来判断是否到达目标——到达时不发控制指令，避免飞控收到零速指令后位置漂移。
+2. **任务交接**: `ego_traj_to_cmd` 在 OFFBOARD 接管后先保持，再从当前位姿启动新轨迹；有效零速帧同样转发，失效后清除轨迹前馈。
 
 3. **增益切换**: swarm_controller 在 TRAJECTORY 模式下自动切换到高增益参数组 (`Kp_track`, `Kv_track`)，悬停/起降使用较低增益 (`Kp_hover`, `Kv_hover`) 以保证稳定性。
 

@@ -8,6 +8,7 @@
   <arg name="uav_init_yaw" default="0.0"/>
   <arg name="input_source" default="4"/>
   <arg name="takeoff_height" default="1.2"/>
+  <arg name="enable_mission_gate" default="true"/>
   <arg name="frame_adapter_config" default="$(find prometheus_swarm_control)/launch/frame_adapter.yaml"/>
   <!-- Sensor/vision compensation is independent of the inter-UAV initial placement. -->
   <arg name="vision_offset_x" default="0.0"/>
@@ -55,5 +56,8 @@
     <param name="swarm_num" value="$(arg swarm_num)"/>
     <param name="uav_id" value="$(arg uav_id)"/>
     <param name="control_flag" value="0"/>
+    <param name="enable_mission_gate" value="$(arg enable_mission_gate)"/>
+    <param name="require_frame_ready" value="$(arg enable_world_frame)"/>
+    <param name="takeoff_height" value="$(arg takeoff_height)"/>
   </node>
 </launch>

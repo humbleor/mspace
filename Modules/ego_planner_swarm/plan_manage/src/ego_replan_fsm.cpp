@@ -28,6 +28,8 @@ namespace ego_planner
     // 未知
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
     nh.param("fsm/use_bridge", bridge_mode_, false);
+    nh.param("fsm/mission_gate", mission_gate_, false);
+    if (mission_gate_) flag_realworld_experiment_ = true;
     // 真实实验中需要等待"/traj_start_trigger"话题
     have_trigger_ = !flag_realworld_experiment_;
     // 读取waypoint
@@ -88,6 +90,14 @@ namespace ego_planner
       bridge_request_sub_ = nh.subscribe("planning/bridge_request_current", 1,
           &EGOReplanFSM::bridgeRequestCallback, this);
 
+    if (mission_gate_)
+    {
+      const std::string prefix = "/uav" + std::to_string(planner_manager_->pp_.drone_id) + "/planning/";
+      mission_start_sub_ = nh.subscribe(prefix + "mission_start", 1, &EGOReplanFSM::missionStartCallback, this);
+      mission_stop_sub_ = nh.subscribe(prefix + "mission_stop", 1, &EGOReplanFSM::missionStopCallback, this);
+      mission_ready_pub_ = nh.advertise<std_msgs::Bool>(prefix + "mission_ready", 1, true);
+      std_msgs::Bool ready; ready.data = false; mission_ready_pub_.publish(ready);
+    }
     bspline_pub_ = nh.advertise<traj_utils::Bspline>("planning/bspline", 10);
     data_disp_pub_ = nh.advertise<traj_utils::DataDisp>("planning/data_display", 100);
 
@@ -98,7 +108,7 @@ namespace ego_planner
     }
     else if (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET)
     {
-      trigger_sub_ = nh.subscribe("/traj_start_trigger", 1, &EGOReplanFSM::triggerCallback, this);
+      if (!mission_gate_) trigger_sub_ = nh.subscribe("/traj_start_trigger", 1, &EGOReplanFSM::triggerCallback, this);
       ROS_INFO("Wait for 1 second.");
       ros::Duration(1.0).sleep();
       ros::spinOnce();
@@ -143,19 +153,22 @@ namespace ego_planner
 
       ROS_WARN("Waiting for trigger from [n3ctrl] from RC");
 
-      // wait trigger
-      while (ros::ok() && (!have_odom_ || !have_trigger_))
+      if (!mission_gate_)
       {
-        ros::spinOnce();
-        ros::Duration(0.001).sleep();
+        while (ros::ok() && (!have_odom_ || !have_trigger_))
+        {
+          ros::spinOnce();
+          ros::Duration(0.001).sleep();
+        }
+        readGivenWps();
       }
-
-      readGivenWps();
     }
     else 
     {
       cout << "Wrong target_type_ value! target_type_=" << target_type_ << endl;
     }
+    mission_initialized_ = true;
+    if (mission_gate_) { std_msgs::Bool ready; ready.data = true; mission_ready_pub_.publish(ready); }
   }
 
   Eigen::Vector4d EGOReplanFSM::getColorByDroneId()
@@ -500,6 +513,10 @@ namespace ego_planner
   // 读取预设目标点
   void EGOReplanFSM::readGivenWps()
   {
+    level_grid_approach_ = !strict_waypoint_tracking_ && target_type_ == TARGET_TYPE::GENERATE_TARGET &&
+      wps_.size()>1 && std::all_of(wps_.begin(),wps_.end(),[&](const Eigen::Vector3d &p) {
+        return std::abs(p.z()-wps_.front().z())<1e-6;
+      });
     if (strict_waypoint_tracking_)
     {
       if (wps_.empty())
@@ -514,7 +531,8 @@ namespace ego_planner
 
     if (waypoint_num_ > 1 && (target_type_ == TARGET_TYPE::PRESET_TARGET || target_type_ == TARGET_TYPE::GENERATE_TARGET))
     {
-      bool success = planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), wps_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
+      bool success = planner_manager_->planGlobalTrajWaypoints(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), wps_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero(),
+          level_grid_approach_);
 
       if (success)
       {
@@ -637,6 +655,35 @@ namespace ego_planner
     }
   }
 
+  void EGOReplanFSM::missionStopCallback(const std_msgs::HeaderConstPtr &msg)
+  {
+    if (!mission_gate_ || msg->stamp < mission_start_time_ || msg->stamp <= mission_stop_time_) return;
+    mission_stop_time_ = msg->stamp;
+    mission_active_ = false; level_grid_approach_ = false; have_trigger_ = false; have_target_ = false; have_new_target_ = false;
+    planner_manager_->local_data_.start_time_ = ros::Time();
+    changeFSMExecState(WAIT_TARGET, "MISSION_STOP");
+  }
+
+  void EGOReplanFSM::missionStartCallback(const geometry_msgs::PoseStampedConstPtr &msg)
+  {
+    const double age = (ros::Time::now() - msg->header.stamp).toSec();
+    const double odom_age = (ros::Time::now() - odom_stamp_).toSec();
+    if (!mission_gate_ || !mission_initialized_ || mission_active_ || !have_odom_ ||
+        msg->header.frame_id != "world" || msg->header.stamp.isZero() ||
+        msg->header.stamp <= mission_start_time_ || msg->header.stamp <= mission_stop_time_ || age < -.1 || age > 1. ||
+        odom_stamp_.isZero() || odom_age < -.1 || odom_age > .5) return;
+    mission_start_time_ = msg->header.stamp;
+    mission_active_ = true; have_trigger_ = true; have_target_ = false;
+    init_pt_ = odom_pos_;
+    changeFSMExecState(WAIT_TARGET, "MISSION_START");
+    // Rebuild from the newest odometry, never from the previous local spline.
+    if (target_type_ == PRESET_TARGET || target_type_ == GENERATE_TARGET) {
+      for (int i = 0; i < waypoint_num_; ++i)
+        wps_[i] = Eigen::Vector3d(waypoints_[i][0], waypoints_[i][1], waypoints_[i][2]);
+      readGivenWps();
+    }
+  }
+
   void EGOReplanFSM::triggerCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
     have_trigger_ = true;
@@ -646,6 +693,7 @@ namespace ego_planner
 
   void EGOReplanFSM::waypointCallback(const geometry_msgs::PoseStampedPtr &msg)
   {
+    if (mission_gate_ && !mission_active_) return;
     cout << "EGO: Get goal:" << msg->pose.position.x << "[m]" << msg->pose.position.y<< "[m]" << msg->pose.position.z << "[m]" << endl;
     
     if (msg->pose.position.z < -0.1)
@@ -675,6 +723,7 @@ namespace ego_planner
 
   void EGOReplanFSM::odometryCallback(const nav_msgs::OdometryConstPtr &msg)
   {
+    odom_stamp_ = msg->header.stamp;
     odom_pos_(0) = msg->pose.pose.position.x;
     odom_pos_(1) = msg->pose.pose.position.y;
     odom_pos_(2) = msg->pose.pose.position.z;
@@ -930,8 +979,21 @@ namespace ego_planner
     cout << "/uav"<< planner_manager_->pp_.drone_id <<" planner state: " + state_str[int(exec_state_)] << endl;
   }
 
+  void EGOReplanFSM::updateGridApproach()
+  {
+    if (level_grid_approach_ && have_odom_ &&
+        (exec_state_==GEN_NEW_TRAJ || exec_state_==REPLAN_TRAJ || exec_state_==EXEC_TRAJ) &&
+        (odom_pos_-wps_.front()).norm()<.2 && odom_vel_.norm()<.2)
+    {
+      level_grid_approach_ = false; wp_id_ = 1; have_new_target_ = true;
+      changeFSMExecState(GEN_NEW_TRAJ, "GRID_CRUISE");
+    }
+  }
+
   void EGOReplanFSM::execFSMCallback(const ros::TimerEvent &e)
   {
+    if (mission_gate_ && !mission_active_) return;
+    updateGridApproach();
     // 暂停计时
     exec_timer_.stop(); // To avoid blockage (阻塞)
 
@@ -1050,6 +1112,8 @@ namespace ego_planner
 
       // 当前位置从轨迹中读取
       Eigen::Vector3d pos = info->position_traj_.evaluateDeBoorT(t_cur);
+
+      if (level_grid_approach_) break; // Keep its zero-speed endpoint until measured arrival.
 
       /* 1. 动态重定位逻辑：当目标点进入雷达感知范围时进行校验 (雷达实时建图重定位) */
       static int last_checked_wp_id = -1;
@@ -1238,6 +1302,7 @@ namespace ego_planner
   void EGOReplanFSM::checkCollisionCallback(const ros::TimerEvent &e)
   {
 
+    if (mission_gate_ && !mission_active_) return;
     LocalTrajData *info = &planner_manager_->local_data_;
     auto map = planner_manager_->grid_map_;
 
@@ -1509,6 +1574,11 @@ namespace ego_planner
 
   void EGOReplanFSM::getLocalTarget()
   {
+    if (level_grid_approach_)
+    {
+      local_target_pt_ = wps_.front(); local_target_vel_.setZero();
+      return; // The normal lookahead must not skip the stopped approach endpoint.
+    }
     double t;
 
     double t_step = planning_horizen_ / 20 / planner_manager_->pp_.max_vel_;

@@ -2,6 +2,7 @@
   <arg name="uav_id" default="1"/>
   <arg name="use_bridge" default="false"/>
   <arg name="enable_world_frame" default="false"/>
+  <arg name="enable_mission_gate" default="true"/>
   <!-- size of map, change the size inflate x, y, z according to your application -->
   <arg name="map_size_x" value="200.0"/>
   <arg name="map_size_y" value="200.0"/>
@@ -17,6 +18,7 @@
   <!-- main algorithm params -->
   <include file="$(find ego_planner)/launch_new/advanced_param_px4.xml">
     <arg name="uav_id" value="$(arg uav_id)"/>
+    <arg name="mission_gate" value="$(arg enable_mission_gate)"/>
     <arg name="use_bridge" value="$(arg use_bridge)"/>
     <arg name="odom_twist_in_body" value="$(arg enable_world_frame)"/>
     <arg name="map_size_x_" value="$(arg map_size_x)"/>
@@ -87,6 +89,8 @@
     <remap from="position_cmd" to="/uav$(arg uav_id)/planning/ego/traj_cmd"/>
     <remap from="~planning/bspline" to="/uav$(arg uav_id)/planning/bspline"/>
     <param name="traj_server/time_forward" value="1.0" type="double"/>
+    <param name="uav_id" value="$(arg uav_id)"/>
+    <param name="mission_gate" value="$(arg enable_mission_gate)"/>
   </node>
 
   <node pkg="odom_visualization" name="uav$(arg uav_id)_odom_visualization" type="odom_visualization" output="screen">
