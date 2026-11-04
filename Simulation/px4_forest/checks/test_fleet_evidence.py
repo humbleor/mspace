@@ -5,7 +5,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from fleet import load_fleet
 from world_frame_evidence import cloud_alignment
-from fleet_evidence import pair_separation, audit_graph, all_ready, all_settled
+from fleet_evidence import pair_separation, audit_graph, all_ready, all_settled, bridge_traffic
 
 
 def rows(points, times=(0.0, 0.04)):
@@ -57,6 +57,50 @@ class FleetEvidenceTests(unittest.TestCase):
         self.assertFalse(all_settled([10.0, None], 14.0))
         self.assertFalse(all_settled([10.0, 12.0], 14.0))
         self.assertTrue(all_settled([10.0, 12.0], 16.0))
+
+    def test_bridge_traffic_requires_each_peer_and_predecessor_chain(self):
+        fleet=load_fleet({"vehicles":[{"uav_id":i,"instance":19+i,"initial":[0,3*(i-1),0,0],
+                                    "goals":[[1,3*(i-1),1.2]]} for i in (1,2,3)]})
+        udp={v.name:{str(peer.uav_id):1 for peer in fleet if peer!=v} for v in fleet}
+        tcp={"uav1":0,"uav2":1,"uav3":1}
+        self.assertTrue(bridge_traffic(fleet,udp,tcp)["passed"])
+        udp["uav1"]["3"]=0
+        self.assertFalse(bridge_traffic(fleet,udp,tcp)["passed"])
+        udp["uav1"]["3"]=1;tcp["uav3"]=0
+        self.assertFalse(bridge_traffic(fleet,udp,tcp)["passed"])
+
+    def test_bridge_graph_requires_local_tx_rx_and_rejects_ros_bypass(self):
+        fleet=load_fleet({"vehicles":[{"uav_id":i,"instance":19+i,
+                          "initial":[0,3*(i-1),0,0],"goals":[[1,3*(i-1),1.2]]} for i in (1,2)]})
+        pubs,subs={},{}
+        for v in fleet:
+            ns=v.namespace;uid=v.uav_id;planner="/uav_%d_ego_planner_node"%uid
+            bridge="/uav_%d_bridge_node"%uid;adapter="/swarm_frame_adapter_uav_%d"%uid
+            for topic,node in {ns+"/mavros/setpoint_raw/local":adapter,
+                               ns+"/mavros/vision_pose/pose":"/swarm_estimator_uav_%d"%uid,
+                               ns+"/planning/ego/traj_cmd":ns+"_traj_server",
+                               ns+"/world/odom":adapter,ns+"/world/cloud":adapter,
+                               ns+"/prometheus/drone_state":adapter,
+                               v.sensor_prefix+"/mid360/lidar":"/forest_swarm",
+                               v.sensor_prefix+"/mid360/imu":"/gazebo"}.items():pubs[topic]=[node]
+            for kind in ("lidar","imu"):subs[v.sensor_prefix+"/mid360/"+kind]=[ns+"/laserMapping"]
+            for topic,publisher,subscriber in [(ns+"/bridge/tx/bspline",planner,bridge),
+                                               (ns+"/bridge/rx/bspline",bridge,planner)]:
+                pubs[topic]=[publisher];subs[topic]=[subscriber]
+            pubs[ns+"/bridge/tx/multi_traj"]=[planner]
+            if uid<2:subs[ns+"/bridge/tx/multi_traj"]=[bridge]
+            if uid>1:
+                pubs[ns+"/bridge/rx/prev_multi_traj"]=[bridge]
+                subs[ns+"/bridge/rx/prev_multi_traj"]=[planner]
+        self.assertTrue(audit_graph(fleet,pubs,subs,use_bridge=True)["passed"])
+        pubs["/broadcast_bspline"]=["/uav_1_ego_planner_node"]
+        self.assertFalse(audit_graph(fleet,pubs,subs,use_bridge=True)["passed"])
+        del pubs["/broadcast_bspline"]
+        subs["/uav1/planning/swarm_trajs"]=["/uav_2_ego_planner_node"]
+        self.assertFalse(audit_graph(fleet,pubs,subs,use_bridge=True)["passed"])
+        del subs["/uav1/planning/swarm_trajs"]
+        subs["/uav2/bridge/rx/bspline"]=[]
+        self.assertFalse(audit_graph(fleet,pubs,subs,use_bridge=True)["passed"])
 
     def test_truth_and_cross_sensor_subscription_rejected(self):
         fleet = load_fleet(

@@ -16,6 +16,7 @@ import roslaunch
 import roslib.packages
 import rospkg
 import rospy
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import Point, PoseStamped
 from nav_msgs.msg import Odometry
 from mavros_msgs.msg import PositionTarget
@@ -112,6 +113,27 @@ class ConfigTest(unittest.TestCase):
         remaps = dict(next(n for n in cfg.nodes if n.type=="ego_planner_node").remap_args)
         self.assertEqual(remaps["~planning/broadcast_bspline_from_planner"], "/broadcast_bspline")
         self.assertEqual(remaps["~planning/broadcast_bspline_to_planner"], "/broadcast_bspline")
+
+    def test_two_uav_sim_bridge_toggle_routes_through_two_bridges(self):
+        direct = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=false")
+        self.assertFalse(any(n.package == "rosmsg_tcp_bridge" for n in direct.nodes))
+        cfg = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=true")
+        bridges = [n for n in cfg.nodes if n.package == "rosmsg_tcp_bridge"]
+        self.assertEqual(len(bridges), 2)
+        planners = [n for n in cfg.nodes if n.type == "ego_planner_node"]
+        self.assertEqual(len(planners), 2)
+        for uid in (1, 2):
+            node = next(n for n in planners if n.name == "uav_%d_ego_planner_node" % uid)
+            remaps = dict(node.remap_args)
+            ns = "/uav%d/bridge/" % uid
+            self.assertEqual(remaps["~planning/broadcast_bspline_from_planner"], ns+"tx/bspline")
+            self.assertEqual(remaps["~planning/broadcast_bspline_to_planner"], ns+"rx/bspline")
+            self.assertIn(("/uav%d/planning/swarm_trajs"%uid, ns+"tx/multi_traj"), {tuple(p) for p in node.remap_args})
+            if uid == 2:
+                self.assertIn(("/uav1/planning/swarm_trajs", ns+"rx/prev_multi_traj"), {tuple(p) for p in node.remap_args})
+            self.assertTrue(cfg.params["/"+node.name+"/fsm/use_bridge"].value)
+        ports = [cfg.params["/"+b.name+"/udp_port"].value for b in bridges]
+        self.assertEqual(len(set(ports)), 2)
 
 class RuntimeTest(unittest.TestCase):
     @classmethod
@@ -229,6 +251,98 @@ class RuntimeTest(unittest.TestCase):
                             "tcp_port":tcp_listen,"tcp_peer_port":tcp_peer,
                             "udp_port":udp_listen,"udp_peer_port":udp_peer})
 
+    def test_udp_port_fanout_reaches_each_local_peer(self):
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as first, socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as second:
+            first.bind(("127.0.0.1",0));second.bind(("127.0.0.1",0))
+            for peer in (first,second):peer.settimeout(3)
+            self.launch("rosmsg_tcp_bridge","bridge_node","fanout_bridge",
+                        {"drone_id":1,"swarm_num":3,"next_drone_ip":"127.0.0.1",
+                         "broadcast_ip":"127.0.0.1","bind_ip":"127.0.0.1",
+                         "tcp_port":port(),"tcp_peer_port":port(),
+                         "udp_port":port(socket.SOCK_DGRAM),"udp_peer_port":port(socket.SOCK_DGRAM),
+                         "udp_peer_ports":[first.getsockname()[1],second.getsockname()[1]]})
+            tx=self.pub("/uav1/bridge/tx/bspline",Bspline)
+            wait_for(lambda:tx.get_num_connections())
+            m=spline(tid=808);tx.publish(m)
+            for peer in (first,second):self.assertEqual(peer.recv(60000),packet(2,1,m))
+
+    def test_two_real_planners_start_from_predecessor_without_local_trajectory(self):
+        cfg = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=true", "rviz:=false")
+        t1,t2,u1,u2 = port(),port(),port(socket.SOCK_DGRAM),port(socket.SOCK_DGRAM)
+        self.bridge(1,t1,t2,u1,u2,"startup_bridge_a")
+        self.bridge(2,t2,t1,u2,u1,"startup_bridge_b")
+        trajectories = {uid:self.sub("/uav%d/bridge/tx/bspline"%uid,Bspline) for uid in (1,2)}
+        chains = self.sub("/uav2/bridge/rx/prev_multi_traj",MultiBsplines)
+        odom,goals = {},{}
+        for uid in (1,2):
+            node = next(n for n in cfg.nodes if n.name=="uav_%d_ego_planner_node"%uid)
+            base="/"+node.name+"/"
+            params={k[len(base):]:v.value for k,v in cfg.params.items() if k.startswith(base)}
+            params.update({"fsm/flight_type":1,"fsm/thresh_replan_time":1000.,
+                           "fsm/thresh_no_replan_meter":10.,"grid_map/resolution":.2,
+                           "grid_map/map_size_x":12.,"grid_map/map_size_y":16.,
+                           "grid_map/map_size_z":4.,"grid_map/odom_depth_timeout":100.})
+            self.launch("ego_planner","ego_planner_node","startup_planner_%d"%uid,
+                        params,[a+":="+b for a,b in node.remap_args])
+            odom[uid]=self.pub("/uav%d/lidar_slam/odom"%uid,Odometry)
+            goals[uid]=self.pub("/uav%d/prometheus/ego/goal"%uid,PoseStamped)
+        wait_for(lambda: all(odom[i].get_num_connections() and goals[i].get_num_connections() for i in (1,2)),timeout=15)
+        for _ in range(15):
+            for uid in (1,2):
+                m=Odometry();m.header.stamp=rospy.Time.now();m.pose.pose.orientation.w=1.
+                m.pose.pose.position=Point(0,(uid-1)*6,1)
+                odom[uid].publish(m)
+            time.sleep(.03)
+        g=PoseStamped();g.pose.position=Point(2,6,1);g.pose.orientation.w=1.
+        goals[2].publish(g)
+        time.sleep(.4)
+        self.assertFalse(trajectories[2],"UAV2 started without a predecessor")
+        g.pose.position=Point(2,0,1);goals[1].publish(g)
+        wait_for(lambda: trajectories[1] and chains and trajectories[2],timeout=15,
+                 reason="both real EGO planners started through TCP predecessor chain")
+        self.assertEqual(chains[0].drone_id_from,1)
+        self.assertEqual(len(chains[0].traj),2)
+        self.assertEqual(chains[0].traj[1].drone_id,1)
+
+    def test_slow_tcp_peer_does_not_block_ros_callback(self):
+        proc = self.launch("rosmsg_tcp_bridge", "bridge_sender_test", "bridge_slow_peer",
+                           {"test_peer_port":port(), "tcp_port":port(),
+                            "udp_port":port(socket.SOCK_DGRAM), "udp_peer_port":port(socket.SOCK_DGRAM)})
+        self.assertEqual(proc.wait(timeout=12), 0, "slow TCP callback regression failed; see bridge_slow_peer.log")
+
+    def test_bridge_diagnostics_distinguish_duplicates_age_and_bad_packets(self):
+        t, u = port(), port(socket.SOCK_DGRAM)
+        self.bridge(2, t, port(), u, port(socket.SOCK_DGRAM), "bridge_diag")
+        reports = self.sub("/uav2/bridge/diagnostics", DiagnosticArray)
+        wait_for(lambda: reports, reason="bridge diagnostics")
+        def values(name):
+            return {v.key:v.value for x in reports[-1].status if x.name==name for v in x.values}
+        peer = "uav2/bridge/peer1"
+        wait_for(lambda: values(peer), reason="peer diagnostics")
+        self.assertEqual(values(peer)["traj_seen"], "false")
+        m = spline(tid=707)
+        m.start_time = rospy.Time.now()-rospy.Duration(2.)
+        m.knots = [-3.,-2.,-1.,0.,1.,2.,3.,4.]
+        good = packet(2, 1, m)
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as sock:
+            sock.sendto(good,("127.0.0.1",u))
+            wait_for(lambda: values(peer).get("traj_id")=="707", reason="valid diagnostic sample")
+            before = float(values(peer)["traj_remaining_sec"])
+            time.sleep(.6)
+            sock.sendto(good,("127.0.0.1",u))
+            sock.sendto(b"bad",("127.0.0.1",u))
+            wait_for(lambda: int(values(peer).get("udp_duplicates","0"))==1, reason="duplicate count")
+            wait_for(lambda: int(values("uav2/bridge/transport").get("udp_invalid","0"))>=1, reason="invalid count")
+            self.assertLess(float(values(peer)["traj_remaining_sec"]), before-.3)
+            self.assertEqual(values(peer)["trajectory_in_time_range"], "false")
+            self.assertLess(float(values(peer)["udp_valid_rx_age_sec"]), 1.)
+            m.traj_id = 708
+            m.start_time = rospy.Time(0xffffffff, 0)
+            sock.sendto(packet(2, 1, m), ("127.0.0.1", u))
+            wait_for(lambda: values(peer).get("traj_id") == "708",
+                     reason="diagnostics survive a far-future source timestamp")
+            self.assertEqual(values(peer)["trajectory_in_time_range"], "false")
+
     def test_same_master_transport_no_feedback_and_peer_restart(self):
         t1,t2,u1,u2 = port(),port(),port(socket.SOCK_DGRAM),port(socket.SOCK_DGRAM)
         a = self.bridge(1,t1,t2,u1,u2,"bridge_a")
@@ -290,7 +404,9 @@ class RuntimeTest(unittest.TestCase):
 
     def test_late_bridge_requests_original_current_planner_chain(self):
         name="current_chain_planner"
-        cfg=load("ego_planner","launch_new/real_ego_run.launch", "uav_id:=1", "use_bridge:=true")
+        # This fixture drives manual goals, not the real mission-start handshake.
+        cfg=load("ego_planner","launch_new/real_ego_run.launch", "uav_id:=1", "use_bridge:=true",
+                 "enable_mission_gate:=false")
         node=next(n for n in cfg.nodes if n.type=="ego_planner_node")
         base="/"+node.name+"/"
         params={k[len(base):]:v.value for k,v in cfg.params.items() if k.startswith(base)}

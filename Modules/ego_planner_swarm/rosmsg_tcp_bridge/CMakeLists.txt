@@ -11,13 +11,14 @@ find_package(Threads REQUIRED)
 
 find_package(catkin REQUIRED COMPONENTS
   roscpp
+  diagnostic_msgs
   std_msgs
   geometry_msgs
   traj_utils
 )
 
 catkin_package(
- CATKIN_DEPENDS traj_utils
+ CATKIN_DEPENDS roscpp std_msgs diagnostic_msgs traj_utils
 )
 
 include_directories(
@@ -39,3 +40,9 @@ target_link_libraries(bridge_node
 catkin_install_python(PROGRAMS scripts/bridge_probe.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(DIRECTORY launch/ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch)
+
+# Internal callback regression compiled against production code, with real sockets.
+add_executable(bridge_sender_test test/bridge_sender_test.cpp)
+target_compile_options(bridge_sender_test PRIVATE -fno-access-control)
+add_dependencies(bridge_sender_test ${catkin_EXPORTED_TARGETS})
+target_link_libraries(bridge_sender_test ${catkin_LIBRARIES} ${CMAKE_THREAD_LIBS_INIT})

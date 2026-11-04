@@ -126,7 +126,26 @@ bash Simulation/start.sh swarm \
 
 每机 LIO 输出保留自己的 `uavN/lio_init`，MAVROS 使用 `uavN/fcu_local`；适配器将点云和状态转换到公共 `world`，并将 world 控制指令逆变换到 FCU。模型、TF、LIO 参数、日志和 PCD 输出均按飞机区分。
 
-EGO 在同一个 ROS Master 内通过 `/broadcast_bspline` 与前序 `/uavN/planning/swarm_trajs` 通信，不需要另启跨主机 TCP 桥。任务触发 remap 到每机 `/uavN/traj_start_trigger`；所有飞机完成坐标初始化和起飞后才分别触发一次。
+默认模式中，EGO 在同一个 ROS Master 内通过 `/broadcast_bspline` 与前序 `/uavN/planning/swarm_trajs` 直连。各机完成坐标初始化和起飞后，由现有 mission gate 分别触发规划。
+
+### 可选 TCP/UDP 通信桥
+
+森林阶段追加 `--use-bridge`：
+
+```bash
+bash Simulation/start.sh swarm \
+  --fleet Simulation/px4_forest/config/fleet_two.json \
+  --use-bridge --gui none --duration 120 --speed .25 \
+  --output "artifacts/px4_forest/two_bridge_$(date +%Y%m%d_%H%M%S)"
+```
+
+- 每机仍运行同一套 PX4、MAVROS、LIO、坐标适配与控制器，仅切换 EGO 的轨迹收发；桥使用当前 MSB2 线格式，不是尚未实现的新 MSB/全互联协议。
+- 自动分配每机独立的 TCP/UDP 端口，TCP 按 `1→2→...` 连接下一跳。UDP 发往所有其他机的本地端口，模拟同网段广播，不依赖 localhost 广播或共享 UDP 端口。配置机数不限于两机，实际容量仍须测试。
+- `manifest.json` 保留开关和端口，`uavN/module_alignment.json` 保留 communication 配置，`uavN/modules.launch` 启动本机桥；桥日志随 `navigation.log` 保存。
+- 每机诊断在 `/uavN/bridge/diagnostics`。另外终点审计将实际 RX 的每来源 UDP 条数及 TCP 前驱链条数写入 `graph.json/bridge_traffic`，与 EGO 是否接受区分。
+- 图审计要求 TX/RX 发布者和订阅者正确，并拒绝 `/broadcast_bspline` 或原前驱话题的规划器直连旁路；不能仅凭端口存在通过验收。
+- 可先加 `--prepare-only` 检查双机/三机生成配置；该模式不会启动飞行进程或证明收发成功。`--stage hover --use-bridge` 不支持，因为 hover 不启动规划链。
+- 仍共享 ROS Master；桥只迁移轨迹，不迁移 DroneState/readiness、命令、TF 或树检测。原 EGO 0.25 s UDP 起始时间门限及失联动作未改，弱网、延迟和完整任务验收以本次结果为准。
 
 ## 仿真速度与资源
 
@@ -143,7 +162,7 @@ PX4 v1.13 的 Gazebo MAVLink 插件在每次模型 Load 时缩放全局物理频
 - `manifest.json`：飞机配置、编号、端口、PX4 提交和共享物理原点。
 - `uavN/`：每机独立 PX4 启动目录、日志、传感器统计、LIO/FCU/world/物理轨迹及 `result.json`。
 - `uavN/requested_waypoint_evidence.json`：world 估计与物理轨迹对原请求航点的顺序到达检查；模块重定位后的 accepted_goals 单独记录。
-- `graph.json`：唯一发布者、每机传感器订阅、轨迹广播及真值隔离检查。
+- `graph.json`：唯一发布者、每机传感器订阅、当前轨迹直连/桥模式与真值隔离检查；桥模式另有实际收包统计。
 - `pair_separation.json`：每一对飞机的最小距离，检查物理采样之间的分段线性轨迹，避免漏掉采样间交叉。
 - `result.json`、`report.md`：所有飞机和公共检查的整体结果。
 - `cleanup.json`：严格按本次 ROS_HOME 归属清理进程。

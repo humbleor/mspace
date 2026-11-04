@@ -847,6 +847,25 @@ namespace ego_planner
     auto msg = incoming;
     if (bridge_mode_)
     {
+      // A receiver N starts from predecessors 1..N-1, never from its own trajectory.
+      const int id = planner_manager_->pp_.drone_id;
+      if (id <= 1 || incoming->drone_id_from != id - 1 || incoming->traj.size() != size_t(id))
+      {
+        ROS_WARN_THROTTLE(2, "Reject non-predecessor bridge chain");
+        return;
+      }
+      const auto &zero = incoming->traj[0];
+      if (zero.drone_id != 0 || !zero.pos_pts.empty() || !zero.knots.empty() || !zero.yaw_pts.empty()) return;
+      for (int i = 1; i < id; ++i)
+      {
+        const auto &m = incoming->traj[i];
+        if (m.drone_id != i || m.order != 3 || m.pos_pts.size() < 4 ||
+            m.knots.size() != m.pos_pts.size() + 4 || m.start_time.isZero())
+        {
+          ROS_WARN_THROTTLE(2, "Reject incomplete predecessor bridge chain");
+          return;
+        }
+      }
       msg.reset(new traj_utils::MultiBsplines(*incoming));
       for (size_t i = 1; i < msg->traj.size() && i < multi_bspline_msgs_buf_.traj.size(); ++i)
       {

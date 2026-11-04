@@ -132,7 +132,7 @@ def load_fleet(source):
     return result
 
 
-def allocate_ports(vehicles):
+def allocate_ports(vehicles, use_bridge=False):
     """Hold every socket until the complete unique port set is allocated."""
     sockets = []
     used = set()
@@ -158,6 +158,7 @@ def allocate_ports(vehicles):
                     "px4": take(socket.SOCK_DGRAM),
                     "mavros": take(socket.SOCK_DGRAM),
                     "unused": take(socket.SOCK_DGRAM),
+                    **({"bridge_tcp":take(socket.SOCK_STREAM), "bridge_udp":take(socket.SOCK_DGRAM)} if use_bridge else {}),
                 }
                 for v in vehicles
             },

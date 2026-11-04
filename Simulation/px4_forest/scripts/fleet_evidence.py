@@ -95,7 +95,7 @@ def pair_separation(traces, minimum, max_gap=0.05, window=None):
     return result
 
 
-def audit_graph(vehicles, publishers, subscribers):
+def audit_graph(vehicles, publishers, subscribers, use_bridge=False):
     errors = []
     expected = {}
     navigation = set()
@@ -148,16 +148,47 @@ def audit_graph(vehicles, publishers, subscribers):
                 v.sensor_prefix + "/mid360/" + kind, []
             ):
                 errors.append(v.name + " missing " + kind + " subscription")
-    if len(vehicles) > 1:
+    if use_bridge:
         planners = {"/uav_%d_ego_planner_node" % v.uav_id for v in vehicles}
-        if not planners.issubset(
-            publishers.get("/broadcast_bspline", [])
-        ) or not planners.issubset(subscribers.get("/broadcast_bspline", [])):
+        for topic, nodes in list(publishers.items()) + list(subscribers.items()):
+            if (topic == "/broadcast_bspline" or re.match(r"^/uav\d+/planning/swarm_trajs$", topic)) and planners.intersection(nodes):
+                errors.append("direct ROS trajectory bypass: " + topic)
+        for v in vehicles:
+            ns = v.namespace
+            planner = "/uav_%d_ego_planner_node" % v.uav_id
+            bridge = "/uav_%d_bridge_node" % v.uav_id
+            routes = [(ns + "/bridge/tx/bspline", planner, bridge),
+                      (ns + "/bridge/rx/bspline", bridge, planner)]
+            if v.uav_id < len(vehicles):
+                routes.append((ns + "/bridge/tx/multi_traj", planner, bridge))
+            if v.uav_id > 1:
+                routes.append((ns + "/bridge/rx/prev_multi_traj", bridge, planner))
+            for topic, publisher, subscriber in routes:
+                if set(publishers.get(topic, [])) != {publisher} or subscriber not in subscribers.get(topic, []):
+                    errors.append("incomplete bridge route: " + topic)
+    elif len(vehicles) > 1:
+        planners = {"/uav_%d_ego_planner_node" % v.uav_id for v in vehicles}
+        if not planners.issubset(publishers.get("/broadcast_bspline", [])) or not planners.issubset(subscribers.get("/broadcast_bspline", [])):
             errors.append("incomplete fleet trajectory broadcast connections")
     return {
         "passed": not errors,
         "errors": errors,
+        "communication_mode": "msb2_bridge" if use_bridge else "ros_direct",
         "expected_publishers": expected,
         "publishers": publishers,
         "subscribers": subscribers,
     }
+
+
+def bridge_traffic(vehicles, udp_received, tcp_received):
+    """Require actual bridge RX messages, separately from ROS graph ownership."""
+    errors = []
+    for v in vehicles:
+        for peer in vehicles:
+            if peer != v and udp_received.get(v.name, {}).get(str(peer.uav_id), 0) < 1:
+                errors.append(v.name + " missing UDP trajectory from " + peer.name)
+        if v.uav_id > 1 and tcp_received.get(v.name, 0) < 1:
+            errors.append(v.name + " missing TCP predecessor chain")
+    return {"passed": not errors, "errors": errors,
+            "udp_received": udp_received, "tcp_chains_received": tcp_received,
+            "scope": "Bridge delivery only; does not prove EGO accepted every trajectory"}

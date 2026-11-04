@@ -31,6 +31,38 @@ def config(n=3):
 
 
 class FleetTests(unittest.TestCase):
+    def test_bridge_cli_and_three_vehicle_generated_ports(self):
+        from run_swarm import parser
+        args=["--fleet","fleet.json","--output","run"]
+        self.assertFalse(parser().parse_args(args).use_bridge)
+        self.assertTrue(parser().parse_args(args+["--use-bridge"]).use_bridge)
+        fleet=load_fleet(config())
+        ports=allocate_ports(fleet,use_bridge=True)
+        all_ports=[ports["ros"],ports["gazebo"]]+[p for row in ports["vehicles"].values() for p in row.values()]
+        self.assertEqual(len(all_ports),len(set(all_ports)))
+        with tempfile.TemporaryDirectory() as tmp:
+            for index,v in enumerate(fleet):
+                out=Path(tmp)/v.name;out.mkdir()
+                own=ports["vehicles"][v.name]
+                bridge={"tcp_port":own["bridge_tcp"],
+                        "tcp_peer_port":ports["vehicles"][fleet[min(index+1,len(fleet)-1)].name]["bridge_tcp"],
+                        "udp_port":own["bridge_udp"],
+                        "udp_peer_ports":[ports["vehicles"][peer.name]["bridge_udp"] for peer in fleet if peer!=v]}
+                info=prepare_modules(ROOT,out,[[*v.initial[:2],1.2],*v.goals],
+                                     world_frame=True,uav_id=v.uav_id,swarm_num=len(fleet),
+                                     initial=v.initial,sensor_prefix=v.sensor_prefix,bridge=bridge)
+                planner=ET.parse(out/"planner_modules.launch").getroot()
+                self.assertEqual(planner.find("arg[@name='use_bridge']").get("value"),"true")
+                wrapper=ET.parse(out/"modules.launch").getroot()
+                include=next(e for e in wrapper.findall("include") if "rosmsg_tcp_bridge" in e.get("file"))
+                values={e.get("name"):e.get("value") for e in include.findall("arg")}
+                self.assertEqual(int(values["uav_id"]),v.uav_id)
+                self.assertEqual(int(values["swarm_num"]),3)
+                self.assertEqual(int(values["tcp_port"]),own["bridge_tcp"])
+                self.assertEqual(json.loads(values["udp_peer_ports"]),bridge["udp_peer_ports"])
+                self.assertNotIn(own["bridge_udp"],json.loads(values["udp_peer_ports"]))
+                self.assertEqual(info["communication"]["mode"],"msb2_bridge")
+
     def test_cli_help_without_ros_environment(self):
         import subprocess, os
 

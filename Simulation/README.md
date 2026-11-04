@@ -132,9 +132,28 @@ bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.js
   --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)" --duration 600 --speed .25
 ```
 
+多机森林入口现在可追加 `--use-bridge`，使用实际 `rosmsg_tcp_bridge` 的 TCP 前驱链与 UDP 单机轨迹；不加开关继续 ROS 直连。每次运行自动分配各机端口，同机 UDP 按对端端口列表分发，端口写入 `manifest.json`。例如：
+
+```bash
+bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
+  --use-bridge --duration 120 --speed .25 \
+  --output "artifacts/px4_forest/two_bridge_$(date +%Y%m%d_%H%M%S)"
+```
+
+`--use-bridge` 用于 forest 阶段；hover 不启动 EGO，传入该组合会报错。桥只承载轨迹，状态/readiness 等仍使用本次共享 ROS Master 下的话题。
+
 双机示例起点为 `(0,0,0)` / `(0,5,0)`，每机根据自己的 `grid` 范围和步长生成航点；也可改用显式 `goals`，两者二选一。三机改用 `config/fleet_three.json`。多机入口默认同时启动 RViz 和 Gazebo，可用 `--gui gazebo` / `--gui rviz` 只开一个窗口，或 `--gui none` 无窗口运行；每机独立雷达/IMU、LIO、MAVROS 和规划控制链。配置、坐标、速度、验收与验证边界见 [多机说明](px4_forest/docs/fleet.md)。
 
 ## 5. 查看结果
+
+当前仿真用的是独立的 41887 端口。查看仿真话题：
+
+```bash
+source ~/workspace/mspace/devel/setup.bash
+export ROS_MASTER_URI=http://127.0.0.1:41887
+
+rostopic list
+```
 
 启动终端会打印本次输出目录，默认位于 `artifacts/px4_forest/<模式>_<时间>_<PID>/`。运行结束后在本地查看：
 

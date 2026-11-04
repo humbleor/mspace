@@ -1,4 +1,6 @@
 <launch>
+  <arg name="use_bridge" default="true"/>
+  <arg name="rviz" default="true"/>
   <arg name="use_gpu_" value="false"/>
 
   <!-- size of map, change the size inflate x, y, z according to your application -->
@@ -51,6 +53,7 @@
   <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="$(arg uav_id_1)"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="use_bridge" value="$(arg use_bridge)"/>
     <arg name="lidar_type" value="mid360"/>
     <arg name="init_x" value="$(arg init_x)"/>
     <arg name="init_y" value="$(arg init_y)"/>
@@ -92,6 +95,7 @@
   <include file="$(find ego_planner)/launch_new/single_uav_lio.xml">
     <arg name="uav_id" value="$(arg uav_id_2)"/>
     <arg name="uav_num_" value="$(arg uav_num)"/>
+    <arg name="use_bridge" value="$(arg use_bridge)"/>
     <arg name="lidar_type" value="mid360"/>
     <arg name="init_x" value="$(arg init_x)"/>
     <arg name="init_y" value="6.0"/>
@@ -128,7 +132,10 @@
     <arg name="flight_type" value="3" />
   </include>
 
-  <node name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
+  <!-- Same MSB bridge as hardware; localhost peers need separate ports. -->
+  <include if="$(arg use_bridge)" file="$(find rosmsg_tcp_bridge)/launch/ground_test.launch"/>
+
+  <node if="$(arg rviz)" name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
   args="-d $(find ego_planner)/launch_new/traj.rviz" />
 
 </launch>

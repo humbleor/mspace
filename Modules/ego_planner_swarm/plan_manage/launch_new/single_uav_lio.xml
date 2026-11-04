@@ -1,6 +1,7 @@
 <launch>
     <!-- UAV ID and Initial Position -->
     <arg name="uav_id"/>
+    <arg name="use_bridge" default="false"/>
     <arg name="uav_num_" default="1"/> <!-- Total number of UAVs -->
     <arg name="init_x"/>
     <arg name="init_y"/>
@@ -64,6 +65,7 @@
     <!-- ========================================================== -->
     <include file="$(find ego_planner)/launch_new/advanced_param_px4.xml">
         <arg name="uav_id" value="$(arg uav_id)"/>
+        <arg name="use_bridge" value="$(arg use_bridge)"/>
         <arg name="map_size_x_" value="$(arg map_size_x)"/>
         <arg name="map_size_y_" value="$(arg map_size_y)"/>
         <arg name="map_size_z_" value="$(arg map_size_z)"/>

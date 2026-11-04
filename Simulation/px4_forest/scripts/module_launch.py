@@ -107,6 +107,7 @@ def prepare_modules(
     swarm_num=1,
     initial=(0.0, 0.0, 0.0, 0.0),
     sensor_prefix="/sim",
+    bridge=None,
 ):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root, out = Path(root), Path(out)
@@ -179,6 +180,20 @@ def prepare_modules(
         if e.get("name") == "uav_id":
             e.set("value", str(uav_id))
             e.attrib.pop("default", None)
+    if bridge is not None:
+        arg = planner.getroot().find("arg[@name='use_bridge']")
+        arg.set("value", "true")
+        arg.attrib.pop("default", None)
+        connection = ET.SubElement(wrapper, "include", file=str(root / "Modules/ego_planner_swarm/rosmsg_tcp_bridge/launch/bridge.launch"))
+        arguments = {
+            "uav_id": uav_id, "swarm_num": swarm_num, "next_drone_ip": "127.0.0.1",
+            "broadcast_ip": "127.0.0.1", "bind_ip": "127.0.0.1",
+            "tcp_port": bridge["tcp_port"], "tcp_peer_port": bridge["tcp_peer_port"],
+            "udp_port": bridge["udp_port"], "udp_peer_port": bridge["udp_port"],
+            "udp_peer_ports": str(bridge["udp_peer_ports"]),
+        }
+        for key, value in arguments.items():
+            ET.SubElement(connection, "arg", name=key, value=str(value))
     if world_frame:
         # Legacy visualization broadcasts global /base, /laser, /camera frames.
         # The per-aircraft adapter/MAVROS own all world-mode TF instead.
@@ -260,6 +275,7 @@ def prepare_modules(
         "lio_template": "Modules/fast_lio2/launch/mapping_mid360.launch",
         "planner_template": "Modules/ego_planner_swarm/plan_manage/launch_new/real_ego_run.launch",
         "control_template": "Modules/swarm_control/launch/ego_swarm_control.launch",
+        "communication": {"mode": "msb2_bridge" if bridge is not None else "ros_direct", "bridge": bridge},
         "flight_type": 3 if grid else 2,
         "control_takeoff_height": 1.2,
         "mission_handover": "shared_offboard_gate",

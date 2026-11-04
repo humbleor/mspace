@@ -19,7 +19,7 @@ from bvh_renderer import BVHRenderer
 from scene import to_local
 from fleet import load_fleet, allocate_ports, gazebo_environment, bounded_call
 from fleet_visualization import prepare_rviz, route_markers, vehicle_label
-from fleet_evidence import all_ready, all_settled, pair_separation, audit_graph
+from fleet_evidence import all_ready, all_settled, pair_separation, audit_graph, bridge_traffic
 from runtime_model import prepare_model, compose_world
 from module_launch import prepare_modules
 from motion import lidar_motion
@@ -71,6 +71,8 @@ class Aircraft:
     next_scan: float = None
     command_id: int = 0
     received: dict = field(default_factory=dict)
+    bridge_udp_received: dict = field(default_factory=dict)
+    bridge_tcp_received: int = 0
     module_alignment: dict = field(default_factory=dict)
     accepted: np.ndarray = None
     lock: object = field(default_factory=threading.RLock)
@@ -131,6 +133,7 @@ def parser():
     )
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--stage", choices=["hover", "forest"], default="forest")
+    ap.add_argument("--use-bridge", action="store_true", help="Use MSB2 TCP/UDP trajectory bridges instead of direct ROS (forest stage)")
     ap.add_argument(
         "--scene", type=Path, default=ROOT / "artifacts/forest_lio/route_125_155.json"
     )
@@ -175,6 +178,8 @@ def parser():
 def main(argv=None):
     ap = parser()
     a = ap.parse_args(argv)
+    if a.use_bridge and a.stage != "forest":
+        ap.error("--use-bridge requires --stage forest; hover does not start EGO")
     try:
         specs = load_fleet(a.fleet)
         if (
@@ -231,10 +236,10 @@ def main(argv=None):
     startup = StartupStages(out)
     print("Output: %s" % out, flush=True)
     (out / "ros_home").mkdir()
-    ports = allocate_ports(specs)
+    ports = allocate_ports(specs, use_bridge=a.use_bridge)
     aircraft = []
     with startup.stage('Prepare aircraft models and navigation configs'):
-        for v in specs:
+        for index, v in enumerate(specs):
             d = out / v.name
             d.mkdir()
             for name in ("Log", "PCD"):
@@ -261,6 +266,12 @@ def main(argv=None):
                 swarm_num=len(specs),
                 initial=v.initial,
                 sensor_prefix=v.sensor_prefix,
+                bridge={
+                    "tcp_port": ports["vehicles"][v.name]["bridge_tcp"],
+                    "tcp_peer_port": ports["vehicles"][specs[min(index + 1, len(specs) - 1)].name]["bridge_tcp"],
+                    "udp_port": ports["vehicles"][v.name]["bridge_udp"],
+                    "udp_peer_ports": [ports["vehicles"][peer.name]["bridge_udp"] for peer in specs if peer != v],
+                } if a.use_bridge else None,
             )
             write_json(d / "module_alignment.json", c.module_alignment)
             gazebo = prepare_model(
@@ -421,6 +432,7 @@ def main(argv=None):
         import rospy as ros
 
         rospy = ros
+        from traj_utils.msg import Bspline, MultiBsplines
         from nav_msgs.msg import Odometry
         from sensor_msgs.msg import Imu, PointCloud2
         from sensor_msgs import point_cloud2
@@ -452,6 +464,16 @@ def main(argv=None):
             v = c.spec
             ns = v.namespace
             sp = v.sensor_prefix
+
+            if a.use_bridge:
+                def bridge_udp_cb(m, c=c):
+                    source = str(m.drone_id)
+                    c.bridge_udp_received[source] = c.bridge_udp_received.get(source, 0) + 1
+                def bridge_tcp_cb(m, c=c):
+                    c.bridge_tcp_received += 1
+                subscribe(c, ns + "/bridge/rx/bspline", Bspline, bridge_udp_cb)
+                if v.uav_id > 1:
+                    subscribe(c, ns + "/bridge/rx/prev_multi_traj", MultiBsplines, bridge_tcp_cb)
 
             def truth_cb(m, c=c):
                 row = pose_row(m)
@@ -939,7 +961,14 @@ def main(argv=None):
         flight_end = rospy.Time.now().to_sec()
         status = bounded_call(lambda: proxy.getSystemState("/forest_swarm"))[2]
         if a.stage == "forest":
-            graph = audit_graph(specs, dict(status[0]), dict(status[1]))
+            graph = audit_graph(specs, dict(status[0]), dict(status[1]), use_bridge=a.use_bridge)
+            if a.use_bridge:
+                traffic = bridge_traffic(specs,
+                    {c.spec.name: dict(c.bridge_udp_received) for c in aircraft},
+                    {c.spec.name: c.bridge_tcp_received for c in aircraft})
+                graph["bridge_traffic"] = traffic
+                graph["passed"] = graph["passed"] and traffic["passed"]
+                graph["errors"].extend(traffic["errors"])
             if not graph["passed"]:
                 success = False
                 errors.extend(graph["errors"])
