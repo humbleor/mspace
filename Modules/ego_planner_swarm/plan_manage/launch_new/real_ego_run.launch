@@ -31,7 +31,7 @@
     <arg name="box_min_x" value="0.0"/>
     <arg name="box_min_y" value="0.0"/>
     <arg name="box_min_z" value="2.0"/>
-    <arg name="box_max_x" value="20.0"/>
+    <arg name="box_max_x" value="16.0"/>
     <arg name="box_max_y" value="16.0"/>
     <arg name="box_max_z" value="3.0"/>
 

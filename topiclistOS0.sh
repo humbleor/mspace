@@ -19,10 +19,11 @@ fi
 echo "$matched"
 [ "${CHECK_ONLY:-0}" = "1" ] && exit 0
 
-# --duration=60 是每 60 秒切一个包；Ctrl+C 结束录制
+MAX_SIZE="${MAX_SIZE:-4096}"  # 分包阈值（MB）
+
 rosbag record \
 -b 256 \
 --split \
---duration=60 \
+--size="$MAX_SIZE" \
 --regex \
 "$TOPICS"
