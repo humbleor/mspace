@@ -118,7 +118,67 @@ int main(int argc, char **argv) {
     fsm.level_grid_approach_=true; fsm.exec_state_=ego_planner::EGOReplanFSM::EMERGENCY_STOP;
     fsm.updateGridApproach();
     require(fsm.level_grid_approach_ && fsm.exec_state_==ego_planner::EGOReplanFSM::EMERGENCY_STOP,"grid arrival overrode emergency stop");
-    std::cout << "Bridge chain merge and mission reset regression passed" << std::endl;
+    // Flight 20261106-170749: the only local spline ended at z=1.620986,
+    // outside the 0.2 m arrival gate for (0,0,2). Exercise the real FSM
+    // decision with a controlled clock, including a translated follower.
+    for (int id : {1, 2}) {
+      const Eigen::Vector3d offset = id == 1 ? Eigen::Vector3d::Zero().eval() : Eigen::Vector3d(10,5,3);
+      fsm.planner_manager_->pp_.drone_id=id;
+      fsm.wps_={offset+Eigen::Vector3d(0,0,2),offset+Eigen::Vector3d(5,0,2)};
+      fsm.replan_thresh_=1.; fsm.have_odom_=true;
+      auto reset_approach = [&](double time) {
+        ros::Time::setNow(ros::Time(time));
+        fsm.odom_stamp_=ros::Time::now();
+        fsm.level_grid_approach_=true; fsm.wp_id_=0;
+        fsm.exec_state_=ego_planner::EGOReplanFSM::EXEC_TRAJ;
+        fsm.odom_pos_=offset+Eigen::Vector3d(0,0,1.620986);
+        fsm.odom_vel_.setZero();
+        fsm.planner_manager_->local_data_.start_time_=ros::Time(100.);
+        fsm.planner_manager_->local_data_.duration_=1.15;
+      };
+      reset_approach(100.8); fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"unfinished grid approach was interrupted");
+      reset_approach(101.7); fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"grid approach did not allow settling time");
+      reset_approach(102.3); fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::GEN_NEW_TRAJ,"expired spline stranded UAV at 1.62 m instead of retrying from odometry");
+      require(fsm.level_grid_approach_ && fsm.wp_id_==0,"retry skipped the first grid waypoint");
+      fsm.start_pt_=fsm.odom_pos_; fsm.getLocalTarget();
+      require((fsm.local_target_pt_-fsm.wps_.front()).norm()<1e-9 && fsm.local_target_vel_.norm()<1e-9,"retry changed its stopped first-waypoint target");
+      // A successful retry gets its own execution/settling interval.
+      fsm.exec_state_=ego_planner::EGOReplanFSM::EXEC_TRAJ;
+      fsm.planner_manager_->local_data_.start_time_=ros::Time::now();
+      fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"retry immediately restarted a fresh trajectory");
+      // Flight 20261106-171143 at bag t=48.899: measured arrival must
+      // release cruise immediately, even before the spline expires.
+      reset_approach(100.8);
+      fsm.odom_pos_=offset+Eigen::Vector3d(-.0101,.0304,1.9935);
+      fsm.odom_vel_=Eigen::Vector3d(-.0494,.0314,.165);
+      fsm.updateGridApproach();
+      require(!fsm.level_grid_approach_ && fsm.wp_id_==1 && fsm.exec_state_==ego_planner::EGOReplanFSM::GEN_NEW_TRAJ,"normal second-flight arrival did not release cruise");
+      reset_approach(102.3); fsm.odom_pos_=fsm.wps_.front(); fsm.odom_vel_=Eigen::Vector3d(0,0,.3);
+      fsm.updateGridApproach();
+      require(fsm.level_grid_approach_ && fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"fast passage was mistaken for settled arrival");
+      fsm.odom_vel_.setZero(); fsm.updateGridApproach();
+      require(!fsm.level_grid_approach_,"settled arrival remained stuck");
+      reset_approach(102.3); fsm.odom_stamp_=ros::Time(101.);
+      fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"retry used stale odometry");
+      reset_approach(102.3); fsm.odom_stamp_=ros::Time(103.);
+      fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"retry used future odometry");
+      reset_approach(102.3); fsm.level_grid_approach_=false;
+      fsm.updateGridApproach();
+      require(fsm.exec_state_==ego_planner::EGOReplanFSM::EXEC_TRAJ,"normal cruise acquired grid-approach retry behavior");
+      for (auto state : {ego_planner::EGOReplanFSM::INIT, ego_planner::EGOReplanFSM::WAIT_TARGET,
+                         ego_planner::EGOReplanFSM::SEQUENTIAL_START, ego_planner::EGOReplanFSM::EMERGENCY_STOP}) {
+        reset_approach(102.3); fsm.exec_state_=state;
+        fsm.updateGridApproach();
+        require(fsm.exec_state_==state && fsm.level_grid_approach_,"approach retry bypassed a startup, stop or emergency gate");
+      }
+    }
+    std::cout << "Bridge chain, mission reset and grid approach regressions passed" << std::endl;
   } catch (const std::exception &e) { std::cerr << e.what() << std::endl; return 1; }
   return 0;
 }

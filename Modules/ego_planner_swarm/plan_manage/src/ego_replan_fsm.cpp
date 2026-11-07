@@ -1007,6 +1007,24 @@ namespace ego_planner
       level_grid_approach_ = false; wp_id_ = 1; have_new_target_ = true;
       changeFSMExecState(GEN_NEW_TRAJ, "GRID_CRUISE");
     }
+    else if (level_grid_approach_ && have_odom_ && exec_state_==EXEC_TRAJ &&
+             (odom_pos_-wps_.front()).norm()>=.2)
+    {
+      const auto info = &planner_manager_->local_data_;
+      const auto now = ros::Time::now();
+      const double odom_age = (now-odom_stamp_).toSec();
+      const double elapsed = (now-info->start_time_).toSec();
+      // The optimized endpoint is soft: an expired spline can stop outside
+      // the physical arrival gate. Allow settling, then plan from measured
+      // odometry (GEN_NEW_TRAJ), never extrapolate the expired spline.
+      if (!info->start_time_.isZero() && std::isfinite(info->duration_) && info->duration_>=0. &&
+          elapsed>info->duration_+std::max(0.,replan_thresh_) &&
+          !odom_stamp_.isZero() && odom_age>=0. && odom_age<=.5)
+      {
+        ROS_WARN_THROTTLE(1., "Grid approach ended before arrival; retrying from odometry.");
+        changeFSMExecState(GEN_NEW_TRAJ, "GRID_APPROACH_RETRY");
+      }
+    }
   }
 
   void EGOReplanFSM::execFSMCallback(const ros::TimerEvent &e)
