@@ -3,6 +3,16 @@
   <arg name="use_bridge" default="false"/>
   <arg name="enable_world_frame" default="false"/>
   <arg name="enable_mission_gate" default="true"/>
+  <!-- Grid bounds are in the planner frame (shared world in world mode). -->
+  <arg name="box_min_x" default="0.0"/>
+  <arg name="box_min_y" default="0.0"/>
+  <arg name="box_min_z" default="2.0"/>
+  <arg name="box_max_x" default="16.0"/>
+  <arg name="box_max_y" default="16.0"/>
+  <arg name="box_max_z" default="3.0"/>
+  <arg name="step_X" default="5.0"/>
+  <arg name="step_Y" default="5.0"/>
+  <arg name="step_Z" default="2.0"/>
   <!-- size of map, change the size inflate x, y, z according to your application -->
   <arg name="map_size_x" value="200.0"/>
   <arg name="map_size_y" value="200.0"/>
@@ -28,16 +38,16 @@
     <arg name="obj_num_set" value="$(arg obj_num)" />
 
     <!-- 路径点生成参数 -->
-    <arg name="box_min_x" value="0.0"/>
-    <arg name="box_min_y" value="0.0"/>
-    <arg name="box_min_z" value="2.0"/>
-    <arg name="box_max_x" value="16.0"/>
-    <arg name="box_max_y" value="16.0"/>
-    <arg name="box_max_z" value="3.0"/>
+    <arg name="box_min_x" value="$(arg box_min_x)"/>
+    <arg name="box_min_y" value="$(arg box_min_y)"/>
+    <arg name="box_min_z" value="$(arg box_min_z)"/>
+    <arg name="box_max_x" value="$(arg box_max_x)"/>
+    <arg name="box_max_y" value="$(arg box_max_y)"/>
+    <arg name="box_max_z" value="$(arg box_max_z)"/>
 
-    <arg name="step_X" value="5.0"/>
-    <arg name="step_Y" value="5.0"/>
-    <arg name="step_Z" value="2.0"/>
+    <arg name="step_X" value="$(arg step_X)"/>
+    <arg name="step_Y" value="$(arg step_Y)"/>
+    <arg name="step_Z" value="$(arg step_Z)"/>
 
     <!-- waypointDistribution flag 0:水平遍历fly, 1表示垂直fly, 2表示螺旋式fly,针对单颗树木-->
     <arg name="waypointDistriFlag" value="0"/>

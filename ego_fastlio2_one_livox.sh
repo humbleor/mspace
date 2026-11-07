@@ -14,9 +14,22 @@ source /opt/ros/noetic/setup.bash
 source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash
 
+# :- 是语法，默认值 +1
 WORLD_FRAME="${WORLD_FRAME:-1}"
 TFMINI_ID="${TFMINI_ID:-0}"
 LIDAR_ID="${LIDAR_ID:-192_168_2_181}"
+
+# 任务网格范围和间距（米），使用当前规划坐标系。
+BOX_MIN_X="${BOX_MIN_X:-0.0}"
+BOX_MIN_Y="${BOX_MIN_Y:-0.0}"
+BOX_MIN_Z="${BOX_MIN_Z:-2.0}"
+BOX_MAX_X="${BOX_MAX_X:-16.0}"
+BOX_MAX_Y="${BOX_MAX_Y:-16.0}"
+BOX_MAX_Z="${BOX_MAX_Z:-3.0}"
+STEP_X="${STEP_X:-5.0}"
+STEP_Y="${STEP_Y:-5.0}"
+STEP_Z="${STEP_Z:-2.0}"
+GRID_ARGS="box_min_x:=$BOX_MIN_X box_min_y:=$BOX_MIN_Y box_min_z:=$BOX_MIN_Z box_max_x:=$BOX_MAX_X box_max_y:=$BOX_MAX_Y box_max_z:=$BOX_MAX_Z step_X:=$STEP_X step_Y:=$STEP_Y step_Z:=$STEP_Z"
 
 if [ "$WORLD_FRAME" = "1" ]; then
     MAVROS_ARGS="enable_world_frame:=true tfmini_id:=$TFMINI_ID"
@@ -38,6 +51,6 @@ gnome-terminal \
 --tab -e "bash -c 'sleep 5; $DRIVER_CMD; exec bash'" \
 --tab -e "bash -c 'sleep 15; $LIO_CMD; exec bash'" \
 --tab -e "bash -c 'sleep 10; roslaunch prometheus_swarm_control ego_swarm_control.launch $CONTROL_ARGS; exec bash'" \
---tab -e "bash -c 'sleep 30; roslaunch ego_planner real_ego_run.launch $PLANNER_ARGS; exec bash'" \
+--tab -e "bash -c 'sleep 30; roslaunch ego_planner real_ego_run.launch $PLANNER_ARGS $GRID_ARGS; exec bash'" \
 --tab -e "bash -c 'sleep 15; roslaunch prometheus_swarm_control ego_station.launch; exec bash'" \
 --tab -e "bash -c 'sleep 5; roslaunch realsense2_camera rs_camera.launch; exec bash'"

@@ -1,7 +1,7 @@
 <launch>
   <arg name="uav_id" default="1"/>
   <arg name="enable_world_frame" default="false"/>
-  <arg name="rviz" default="true"/>
+  <arg name="rviz" default="false"/>
   <arg name="lidar_topic" default="$(eval ('/uav'+str(arg('uav_id')) if arg('enable_world_frame') else '') + '/livox/lidar_192_168_2_174')"/>
   <arg name="imu_topic" default="$(eval ('/uav'+str(arg('uav_id')) if arg('enable_world_frame') else '') + '/livox/imu_192_168_2_174')"/>
   <group ns="$(eval 'uav'+str(arg('uav_id')) if arg('enable_world_frame') else '/')">
