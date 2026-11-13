@@ -26,6 +26,7 @@ class EgoTrajBridge
   bool seen_position_ = false, offboard_ = false, external_takeoff_ = false;
   bool have_pose_ = false, have_hold_ = false, have_command_ = false, have_last_good_ = false;
   double settle_time_ = .75, feedback_timeout_ = .5, command_timeout_ = .5;
+  double feedback_receive_timeout_ = .5;
   double speed_limit_ = .2, hold_tolerance_ = .15, initial_error_ = .35, planning_timeout_ = 10.;
   double takeoff_height_ = 1.2, takeoff_z_ = 0.;
   ros::WallTime pose_recv_, frame_recv_;
@@ -44,9 +45,9 @@ class EgoTrajBridge
   { const double age=(ros::Time::now()-t).toSec(); return !t.isZero() && age>=-.1 && age<=timeout; }
   bool feedbackValid() const
   {
-    if (!have_pose_ || !recent(pose_recv_,feedback_timeout_) || !freshStamp(pose_.header.stamp,feedback_timeout_) ||
+    if (!have_pose_ || !recent(pose_recv_,feedback_receive_timeout_) || !freshStamp(pose_.header.stamp,feedback_timeout_) ||
         !freshStamp(state_time_,2.5) || !state_.connected || !freshStamp(land_time_,1.5) ||
-        (require_frame_ && (!frame_ || !recent(frame_recv_,feedback_timeout_)))) return false;
+        (require_frame_ && (!frame_ || !recent(frame_recv_,feedback_receive_timeout_)))) return false;
     if (pose_.header.frame_id!="world") return false;
     for (int i=0;i<3;++i)
       if (!std::isfinite(pose_.position[i]) || !std::isfinite(pose_.velocity[i]) ||
@@ -150,7 +151,10 @@ class EgoTrajBridge
   {
     const bool state_valid=freshStamp(state_time_,2.5) && state_.connected;
     if (!state_valid) {
-      if (offboard_ && phase_!="blocked") abortMission();
+      if (offboard_ && phase_!="blocked") {
+        ROS_WARN("Handover blocked: FCU state stale or disconnected");
+        abortMission();
+      }
       return; // Uncertain mode is not a confirmed operator exit/re-entry.
     }
     const bool mode=state_.armed && state_.mode=="OFFBOARD";
@@ -168,7 +172,12 @@ class EgoTrajBridge
     if (feedbackValid()) { last_good_=pose_; have_last_good_=true; }
     if(phase_=="waiting" && !seen_position_ && !external_takeoff_) return; // Do not auto-start on an in-air node restart.
     if(!feedbackValid()) {
-      if(phase_!="waiting" && phase_!="blocked") abortMission();
+      if(phase_!="waiting" && phase_!="blocked") {
+        ROS_WARN("Handover blocked: invalid feedback [pose age=%.3f recv=%.3f; frame=%d recv=%.3f; extended state age=%.3f]",
+                 (ros::Time::now()-pose_.header.stamp).toSec(), (ros::WallTime::now()-pose_recv_).toSec(),
+                 int(frame_), (ros::WallTime::now()-frame_recv_).toSec(), (ros::Time::now()-land_time_).toSec());
+        abortMission();
+      }
       return;
     }
     if(phase_=="blocked") { if(have_hold_) publishHold(); return; }
@@ -197,7 +206,12 @@ class EgoTrajBridge
       publishHold();
       if((ros::Time::now()-session_).toSec()>planning_timeout_) abortMission();
     } else if(phase_=="running") {
-      if(!have_command_ || !freshStamp(command_stamp_,command_timeout_)) { abortMission(); publishHold(); }
+      if(!have_command_ || !freshStamp(command_stamp_,command_timeout_)) {
+        ROS_WARN("Handover blocked: trajectory command missing or stale (age=%.3f)",
+                 (ros::Time::now()-command_stamp_).toSec());
+        abortMission();
+        publishHold();
+      }
       else publishCommand(command_);
     }
   }
@@ -212,10 +226,11 @@ public:
     trajectory_sub_=nh_.subscribe(prefix_+"/planning/ego/traj_cmd",1,&EgoTrajBridge::trajectory,this);
     if(!gated_) return;
     nh_.param("handover/settle_time",settle_time_,.75); nh_.param("handover/feedback_timeout",feedback_timeout_,.5);
+    nh_.param("handover/feedback_receive_timeout",feedback_receive_timeout_,feedback_timeout_);
     nh_.param("handover/trajectory_timeout",command_timeout_,.5); nh_.param("handover/max_speed",speed_limit_,.2);
     nh_.param("handover/hold_tolerance",hold_tolerance_,.15); nh_.param("handover/max_initial_error",initial_error_,.35);
     nh_.param("handover/planning_timeout",planning_timeout_,10.); nh_.param("takeoff_height",takeoff_height_,1.2);
-    for(double value:{settle_time_,feedback_timeout_,command_timeout_,speed_limit_,hold_tolerance_,initial_error_,planning_timeout_,takeoff_height_})
+    for(double value:{settle_time_,feedback_timeout_,feedback_receive_timeout_,command_timeout_,speed_limit_,hold_tolerance_,initial_error_,planning_timeout_,takeoff_height_})
       if(!std::isfinite(value) || value<=0) throw std::runtime_error("Handover limits must be finite and positive");
     start_pub_=nh_.advertise<geometry_msgs::PoseStamped>(prefix_+"/planning/mission_start",1);
     stop_pub_=nh_.advertise<std_msgs::Header>(prefix_+"/planning/mission_stop",1);

@@ -1,8 +1,53 @@
 #include "swarm_controller.h"
+#include <std_msgs/Int32MultiArray.h>
 
 using namespace std;
 void mainloop_cb(const ros::TimerEvent &e);
 void control_cb(const ros::TimerEvent &e);
+
+namespace {
+bool use_bridge = false;
+ros::SteadyTime neighbor_trajectory_last_update, all_trajectories_since;
+constexpr double neighbor_trajectory_timeout = 2.0;
+constexpr double trajectory_recovery_delay = 0.5;
+
+void setTrajectorySpeed(bool available)
+{
+    const double target = available ? 1.0 : 0.5;
+    if (vel_scale_target_ == target) return;
+    vel_scale_target_ = target;
+    if (available)
+        ROS_INFO("Neighbor trajectories available, ramping velocity setpoint to 1.0x");
+    else
+        ROS_WARN("Neighbor trajectories unavailable, ramping velocity setpoint to 0.5x");
+}
+
+void tcpStateCb(const std_msgs::Bool::ConstPtr &msg)
+{
+    bridgeStateCb(msg, !use_bridge);
+}
+
+void neighborTrajectoriesCb(const std_msgs::Int32MultiArray::ConstPtr &msg)
+{
+    const auto now = ros::SteadyTime::now();
+    if (!neighbor_trajectory_last_update.isZero() &&
+        (now - neighbor_trajectory_last_update).toSec() >= neighbor_trajectory_timeout) {
+        all_trajectories_since = ros::SteadyTime();
+        setTrajectorySpeed(false);
+    }
+    neighbor_trajectory_last_update = now;
+    for (int id = 1; id <= swarm_num; ++id) {
+        if (id != uav_id && std::find(msg->data.begin(), msg->data.end(), id) == msg->data.end()) {
+            all_trajectories_since = ros::SteadyTime();
+            setTrajectorySpeed(false);
+            return;
+        }
+    }
+    if (all_trajectories_since.isZero()) all_trajectories_since = now;
+    if ((now - all_trajectories_since).toSec() >= trajectory_recovery_delay)
+        setTrajectorySpeed(true);
+}
+} // namespace
 
 //>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>主 函 数<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 int main(int argc, char **argv)
@@ -13,6 +58,7 @@ int main(int argc, char **argv)
     // 读取参数，变量初始化
     init(nh);
     nh.param("require_frame_ready", require_frame_ready, false);
+    nh.param("use_bridge", use_bridge, false);
     if (require_frame_ready) {
         if (controller_flag != 1 || swarm_num < 1 || swarm_num > MAX_UAV_NUM) {
             ROS_FATAL("world-frame mode requires PX4 position control and swarm_num in 1..50");
@@ -42,8 +88,13 @@ int main(int argc, char **argv)
     //【订阅】本机状态信息
     drone_state_sub = nh.subscribe<prometheus_msgs::DroneState>(uav_name + "/prometheus/drone_state", 10, drone_state_cb);
 
-    //【订阅】bridge 链路状态 — 断时 vel_des 自动 ×0.5 而不是悬停
-    bridge_state_sub = nh.subscribe<std_msgs::Bool>(uav_name + "/bridge_connection_state", 10, bridgeStateCb);
+    bridge_state_sub = nh.subscribe(uav_name + "/bridge_connection_state", 10, tcpStateCb);
+    ros::Subscriber neighbor_trajectory_sub;
+    if (use_bridge && swarm_num > 1) {
+        setTrajectorySpeed(false);
+        neighbor_trajectory_sub = nh.subscribe(uav_name + "/planning/usable_neighbor_trajectories",
+                                              1, neighborTrajectoriesCb);
+    }
 
     //【订阅】邻居飞机的状态信息
     for(int i = 1; i <= swarm_num; i++) 
@@ -83,6 +134,20 @@ int main(int argc, char **argv)
 
     ros::Timer debug_timer = nh.createTimer(ros::Duration(10.0), debug_cb);
     ros::Timer mainloop_timer = nh.createTimer(ros::Duration(0.1), mainloop_cb);
+    // Bridge reports every 0.5 wall seconds. Direct ROS mode has no heartbeat.
+    ros::WallTimer bridge_watchdog = nh.createWallTimer(ros::WallDuration(0.5),
+        [](const ros::WallTimerEvent &) {
+            if (use_bridge && swarm_num > 1 && !neighbor_trajectory_last_update.isZero() &&
+                (ros::SteadyTime::now() - neighbor_trajectory_last_update).toSec() >= neighbor_trajectory_timeout) {
+                all_trajectories_since = ros::SteadyTime();
+                setTrajectorySpeed(false);
+            }
+            if (!bridge_last_heartbeat_.isZero() && !bridge_heartbeat_missing_ &&
+                (ros::SteadyTime::now() - bridge_last_heartbeat_).toSec() > 2.0) {
+                bridge_heartbeat_missing_ = true;
+                ROS_WARN("[bridge] Link status heartbeat missing for over 2 seconds");
+            }
+        });
     ros::Timer control_timer = nh.createTimer(ros::Duration(1.0/controller_hz), control_cb);
 
     ros::spin();
@@ -386,8 +451,7 @@ void control_cb(const ros::TimerEvent &e)
             send_pos_setpoint(pos_des, yaw_des);
         }else if( Command_Now.Mode == prometheus_msgs::SwarmCommand::Velocity_Control )
         {
-            vel_des *= vel_scale;  // bridge 断时降速，不悬停
-            send_vel_xy_pos_z_setpoint(pos_des, vel_des, yaw_des);
+            send_vel_xy_pos_z_setpoint(pos_des, vel_des * vel_scale, yaw_des);
         }else if( Command_Now.Mode == prometheus_msgs::SwarmCommand::Accel_Control )
         {
             // 暂不可用
@@ -405,13 +469,11 @@ void control_cb(const ros::TimerEvent &e)
             // }
             else if(Command_Now.Move_mode == prometheus_msgs::SwarmCommand::XY_VEL_Z_POS)
             {
-                vel_des *= vel_scale;  // bridge 断时降速
-                send_pos_vel_acc_setpoint(pos_des, vel_des, acc_des,yaw_des);
+                send_pos_vel_acc_setpoint(pos_des, vel_des * vel_scale, acc_des, yaw_des);
             }
             else if(Command_Now.Move_mode == prometheus_msgs::SwarmCommand::TRAJECTORY)
             {
-                vel_des *= vel_scale;  // bridge 断时降速，EGO planner 任务不中断
-                send_pos_vel_xyz_setpoint(pos_des, vel_des, yaw_des);
+                send_pos_vel_xyz_setpoint(pos_des, vel_des * vel_scale, yaw_des);
             }
             else
             {

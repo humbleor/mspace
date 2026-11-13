@@ -266,6 +266,7 @@ def main(argv=None):
                 swarm_num=len(specs),
                 initial=v.initial,
                 sensor_prefix=v.sensor_prefix,
+                simulation_speed=a.speed,
                 bridge={
                     "tcp_port": ports["vehicles"][v.name]["bridge_tcp"],
                     "tcp_peer_port": ports["vehicles"][specs[min(index + 1, len(specs) - 1)].name]["bridge_tcp"],

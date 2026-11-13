@@ -108,6 +108,7 @@ def prepare_modules(
     initial=(0.0, 0.0, 0.0, 0.0),
     sensor_prefix="/sim",
     bridge=None,
+    simulation_speed=None,
 ):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root, out = Path(root), Path(out)
@@ -148,6 +149,7 @@ def prepare_modules(
     control_args = {
         "uav_id": str(uav_id),
         "swarm_num": str(swarm_num),
+        "use_bridge": str(bridge is not None).lower(),
         "input_source": "4",
         "enable_mission_gate": "true",
     }
@@ -163,6 +165,17 @@ def prepare_modules(
                 ),
             }
         )
+    if world_frame and simulation_speed is not None:
+        template = root / "Modules/swarm_control/launch/frame_adapter.yaml"
+        adapter = yaml.safe_load(template.read_text())
+        # Estimator state publication uses /clock; the adapter's receive watchdog uses wall time.
+        adapter["receive_timeout"] = max(
+            adapter["receive_timeout"], adapter["source_timeout"] / simulation_speed
+        )
+        config = out / "frame_adapter_sitl.yaml"
+        config.write_text(yaml.safe_dump(adapter, sort_keys=False))
+        control_args["frame_adapter_config"] = str(config)
+        control_args["handover_feedback_receive_timeout"] = str(0.5 / simulation_speed)
     for k, v in control_args.items():
         ET.SubElement(control, "arg", name=k, value=v)
     # Keep the generated takeoff target consistent with the canonical launch key.

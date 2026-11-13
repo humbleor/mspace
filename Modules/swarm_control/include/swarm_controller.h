@@ -80,10 +80,12 @@ ros::Subscriber bridge_state_sub;
 bool   bridge_alive       = true;
 double vel_scale          = 1.0;   // 当前缩放，vel_des 出口前乘这个
 double vel_scale_target_  = 1.0;   // 目标值，由 callback 设置；control_cb 里斜坡逼近
+ros::SteadyTime bridge_last_heartbeat_;
+bool bridge_heartbeat_missing_ = false;
 ros::Time bridge_state_since_;     // 上次接受状态切换的时间，用于去抖动
 const double BRIDGE_DEBOUNCE_SEC = 0.5;  // 两次切换最小间隔 < 0.5s → 视为抖动忽略
 const double VEL_SCALE_RAMP_PER_SEC = 0.5; // 0.5/s，1.0→0.5 需要 1 秒匀速过渡
-void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg);
+void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg, bool controls_speed);
 
 // 漂移补偿订阅
 ros::Subscriber tree_drift_sub[MAX_UAV_NUM+1];
@@ -336,8 +338,14 @@ void drone_state_cb(const prometheus_msgs::DroneState::ConstPtr& msg)
 }
 
 // bridge 链路状态：断时 vel_des 斜坡降到 ×0.5（不是悬停）；带去抖动防 WiFi 快速翻转
-void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg)
+void bridgeStateCb(const std_msgs::Bool::ConstPtr &msg, bool controls_speed)
 {
+    bridge_last_heartbeat_ = ros::SteadyTime::now();
+    if (bridge_heartbeat_missing_) {
+        bridge_heartbeat_missing_ = false;
+        ROS_INFO("[bridge] Link status heartbeat resumed");
+    }
+    if (!controls_speed) return;
     ros::Time now = ros::Time::now();
     bool new_state = msg->data;
 

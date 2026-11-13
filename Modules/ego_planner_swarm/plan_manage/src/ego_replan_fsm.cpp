@@ -1,5 +1,8 @@
 
 #include <plan_manage/ego_replan_fsm.h>
+#include <plan_manage/bridge_snapshot.h>
+#include <std_msgs/Int32MultiArray.h>
+#include <stdexcept>
 
 namespace ego_planner
 {
@@ -28,6 +31,10 @@ namespace ego_planner
     // 未知
     nh.param("fsm/fail_safe", enable_fail_safe_, true);
     nh.param("fsm/use_bridge", bridge_mode_, false);
+    nh.param("fsm/bridge_clock_bound", bridge_clock_bound_, 0.1);
+    if (bridge_mode_ && (!std::isfinite(bridge_clock_bound_) || bridge_clock_bound_ < 0.0 ||
+                         bridge_clock_bound_ > 0.25))
+      throw std::invalid_argument("fsm/bridge_clock_bound must be between 0 and 0.25 seconds");
     nh.param("fsm/mission_gate", mission_gate_, false);
     if (mission_gate_) flag_realworld_experiment_ = true;
     // 真实实验中需要等待"/traj_start_trigger"话题
@@ -87,8 +94,18 @@ namespace ego_planner
     broadcast_bspline_sub_ = nh.subscribe("planning/broadcast_bspline_to_planner", 100, &EGOReplanFSM::BroadcastBsplineCallback, this, ros::TransportHints().tcpNoDelay());
 
     if (bridge_mode_)
+    {
       bridge_request_sub_ = nh.subscribe("planning/bridge_request_current", 1,
           &EGOReplanFSM::bridgeRequestCallback, this);
+      current_trajectory_service_ = nh.advertiseService("planning/get_current_trajectory",
+          &EGOReplanFSM::getCurrentTrajectory, this);
+      bridge_trajectory_timer_ = nh.createTimer(ros::Duration(0.5),
+          &EGOReplanFSM::bridgeTrajectoryTick, this);
+      const auto prefix = "/uav" + std::to_string(planner_manager_->pp_.drone_id) + "/planning/";
+      neighbor_trajectory_pub_ = nh.advertise<std_msgs::Int32MultiArray>(prefix + "usable_neighbor_trajectories", 1);
+      neighbor_trajectory_timer_ = nh.createWallTimer(ros::WallDuration(0.2),
+          &EGOReplanFSM::publishNeighborTrajectories, this);
+    }
 
     if (mission_gate_)
     {
@@ -553,8 +570,11 @@ namespace ego_planner
         wp_id_ = 0;
 
         if (exec_state_ == WAIT_TARGET)
-          changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
-        else
+        {
+          if (!bridge_mode_)
+            changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
+        }
+        else if (!bridge_mode_ || exec_state_ != SEQUENTIAL_START)
         {
           while (exec_state_ != EXEC_TRAJ)
           {
@@ -635,8 +655,11 @@ namespace ego_planner
 
       /*** FSM ***/
       if (exec_state_ == WAIT_TARGET)
-        changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
-      else
+      {
+        if (!bridge_mode_)
+          changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
+      }
+      else if (!bridge_mode_ || exec_state_ != SEQUENTIAL_START)
       {
         while (exec_state_ != EXEC_TRAJ)
         {
@@ -704,7 +727,7 @@ namespace ego_planner
     {
       callEmergencyStop(odom_pos_);
       have_target_ = false;
-      exec_state_ = WAIT_TARGET;
+      changeFSMExecState(WAIT_TARGET, "OPERATOR_HOLD");
       return;
     }
 
@@ -748,12 +771,12 @@ namespace ego_planner
 
   void EGOReplanFSM::BroadcastBsplineCallback(const traj_utils::BsplinePtr &msg)
   {
-    // printf("BroadcastBsplineCallback!\n");
-    size_t id = msg->drone_id;
-    if ((int)id == planner_manager_->pp_.drone_id)
+    if (msg->drone_id < 0 || msg->drone_id == planner_manager_->pp_.drone_id)
       return;
+    const size_t id = msg->drone_id;
+    const auto now = ros::Time::now();
 
-    if (abs((ros::Time::now() - msg->start_time).toSec()) > 0.25)
+    if (!bridge_mode_ && std::abs((now - msg->start_time).toSec()) > 0.25)
     {
       ROS_ERROR("Time difference is too large! Local - Remote Agent %d = %fs",
                 msg->drone_id, (ros::Time::now() - msg->start_time).toSec());
@@ -762,6 +785,23 @@ namespace ego_planner
 
     {
       std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+
+      if (bridge_mode_)
+      {
+        const auto &cache = planner_manager_->swarm_trajs_buf_;
+        const auto newest = id < cache.size() && cache[id].drone_id == msg->drone_id
+                                ? cache[id].start_time_ : ros::Time();
+        if (msg->start_time > now && (msg->start_time - now).toSec() > bridge_clock_bound_)
+        {
+          ROS_WARN_THROTTLE(2.0, "UAV%d trajectory is ahead of local time beyond the bridge clock budget", msg->drone_id);
+          return;
+        }
+        if (!usableBridgeSnapshot(*msg, msg->drone_id, now, newest, bridge_clock_bound_, true))
+          return;
+        if (!newest.isZero() && msg->start_time > now && now >= newest &&
+            (now - newest).toSec() < cache[id].duration_)
+          return;
+      }
 
       /* Fill up the buffer */
       if (planner_manager_->swarm_trajs_buf_.size() <= id)
@@ -774,15 +814,12 @@ namespace ego_planner
         }
       }
 
-      if (bridge_mode_ && planner_manager_->swarm_trajs_buf_[id].drone_id == int(id) &&
-          planner_manager_->swarm_trajs_buf_[id].start_time_ > msg->start_time) return;
-
       /* Test distance to the agent */
       Eigen::Vector3d cp0(msg->pos_pts[0].x, msg->pos_pts[0].y, msg->pos_pts[0].z);
       Eigen::Vector3d cp1(msg->pos_pts[1].x, msg->pos_pts[1].y, msg->pos_pts[1].z);
       Eigen::Vector3d cp2(msg->pos_pts[2].x, msg->pos_pts[2].y, msg->pos_pts[2].z);
       Eigen::Vector3d swarm_start_pt = (cp0 + 4 * cp1 + cp2) / 6;
-      if ((swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
+      if (!bridge_mode_ && (swarm_start_pt - odom_pos_).norm() > planning_horizen_ * 4.0f / 3.0f)
       {
         planner_manager_->swarm_trajs_buf_[id].drone_id = -1;
         return; // if the current drone is too far to the received agent.
@@ -804,7 +841,11 @@ namespace ego_planner
 
       planner_manager_->swarm_trajs_buf_[id].drone_id = id;
 
-      if (msg->order % 2)
+      if (bridge_mode_)
+      {
+        planner_manager_->swarm_trajs_buf_[id].duration_ = msg->knots[msg->pos_pts.size()] - msg->knots[msg->order] - bridge_clock_bound_;
+      }
+      else if (msg->order % 2)
       {
         double cutback = (double)msg->order / 2 + 1.5;
         planner_manager_->swarm_trajs_buf_[id].duration_ = msg->knots[msg->knots.size() - ceil(cutback)];
@@ -836,44 +877,38 @@ namespace ego_planner
 
     /* Check Collision */
     // printf("Check Collision\n");
-    if (planner_manager_->checkCollision(id))
+    if ((!bridge_mode_ || (exec_state_ == EXEC_TRAJ && msg->start_time <= now)) &&
+        planner_manager_->checkCollision(id))
     {
       changeFSMExecState(REPLAN_TRAJ, "TRAJ_CHECK");
     }
   }
 
-  void EGOReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &incoming)
+  bool EGOReplanFSM::predecessorsReady(const ros::Time &now) const
   {
-    auto msg = incoming;
-    if (bridge_mode_)
+    const int local_id = planner_manager_->pp_.drone_id;
+    if (local_id <= 1)
+      return true;
+    if (!bridge_mode_)
+      return have_recv_pre_agent_;
+
+    std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+    const auto &cache = planner_manager_->swarm_trajs_buf_;
+    for (int id = 1; id < local_id; ++id)
     {
-      // A receiver N starts from predecessors 1..N-1, never from its own trajectory.
-      const int id = planner_manager_->pp_.drone_id;
-      if (id <= 1 || incoming->drone_id_from != id - 1 || incoming->traj.size() != size_t(id))
-      {
-        ROS_WARN_THROTTLE(2, "Reject non-predecessor bridge chain");
-        return;
-      }
-      const auto &zero = incoming->traj[0];
-      if (zero.drone_id != 0 || !zero.pos_pts.empty() || !zero.knots.empty() || !zero.yaw_pts.empty()) return;
-      for (int i = 1; i < id; ++i)
-      {
-        const auto &m = incoming->traj[i];
-        if (m.drone_id != i || m.order != 3 || m.pos_pts.size() < 4 ||
-            m.knots.size() != m.pos_pts.size() + 4 || m.start_time.isZero())
-        {
-          ROS_WARN_THROTTLE(2, "Reject incomplete predecessor bridge chain");
-          return;
-        }
-      }
-      msg.reset(new traj_utils::MultiBsplines(*incoming));
-      for (size_t i = 1; i < msg->traj.size() && i < multi_bspline_msgs_buf_.traj.size(); ++i)
-      {
-        const auto &saved = multi_bspline_msgs_buf_.traj[i];
-        if (saved.drone_id == int(i) && saved.start_time > msg->traj[i].start_time)
-          msg->traj[i] = saved;
-      }
+      if (size_t(id) < cache.size() && cache[id].drone_id == id &&
+          now >= cache[id].start_time_ && (now - cache[id].start_time_).toSec() < cache[id].duration_)
+        continue;
+      ROS_WARN_THROTTLE(2.0, "UDP startup waiting for an active trajectory from UAV%d", id);
+      return false;
     }
+    return true;
+  }
+
+  void EGOReplanFSM::swarmTrajsCallback(const traj_utils::MultiBsplinesPtr &msg)
+  {
+    if (bridge_mode_)
+      return;
     multi_bspline_msgs_buf_ = *msg;
 
     // cout << "\033[45;33mmulti_bspline_msgs_buf.drone_id_from=" << multi_bspline_msgs_buf_.drone_id_from << " multi_bspline_msgs_buf_.traj.size()=" << multi_bspline_msgs_buf_.traj.size() << "\033[0m" << endl;
@@ -895,17 +930,12 @@ namespace ego_planner
       std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
 
       auto &cache = planner_manager_->swarm_trajs_buf_;
-      if (!bridge_mode_) cache.clear();
-      const auto previous_size = cache.size();
-      if (!bridge_mode_ || cache.size() < msg->traj.size()) cache.resize(msg->traj.size());
-      for (size_t i = previous_size; i < cache.size(); ++i) cache[i].drone_id = -1;
+      cache.clear();
+      cache.resize(msg->traj.size());
+      for (auto &peer : cache) peer.drone_id = -1;
 
       for (size_t i = 0; i < msg->traj.size(); i++)
       {
-        // TCP snapshots can arrive after a newer UDP replan. Preserve newer data
-        // and peers outside the predecessor range when refreshing this chain.
-        if (bridge_mode_ && cache[i].drone_id == int(i) &&
-            cache[i].start_time_ >= msg->traj[i].start_time) continue;
         if (msg->traj[i].pos_pts.size() == 0)
         {
           planner_manager_->swarm_trajs_buf_[i].drone_id = -1;
@@ -982,6 +1012,7 @@ namespace ego_planner
     static string state_str[8] = {"INIT", "WAIT_TARGET", "GEN_NEW_TRAJ", "REPLAN_TRAJ", "EXEC_TRAJ", "EMERGENCY_STOP", "SEQUENTIAL_START"};
     int pre_s = int(exec_state_);
     exec_state_ = new_state;
+    bridge_goal_completed_ = false;
     // COMMENT
     // cout << "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)] << endl;
   }
@@ -1074,9 +1105,7 @@ namespace ego_planner
     // 按顺序启动
     case SEQUENTIAL_START: // for swarm
     {
-      // swarmTrajsCallback回调后,have_recv_pre_agent_会被设置为true
-      // ego默认从0开始，我们默认从1开始，因此这里>2
-      if (planner_manager_->pp_.drone_id <= 1 || (planner_manager_->pp_.drone_id >= 2 && have_recv_pre_agent_))
+      if (predecessorsReady(ros::Time::now()))
       {
         if (have_odom_ && have_target_ && have_trigger_)
         {
@@ -1204,6 +1233,7 @@ namespace ego_planner
             have_target_ = false;
             have_trigger_ = false;
             changeFSMExecState(WAIT_TARGET, "WP_DONE");
+            bridge_goal_completed_ = true;
           }
         }
         else if (t_cur > replan_thresh_)
@@ -1234,6 +1264,7 @@ namespace ego_planner
           }
 
           changeFSMExecState(WAIT_TARGET, "FSM");
+          bridge_goal_completed_ = target_type_ != TARGET_TYPE::PRESET_TARGET;
           goto force_return;
           // return;
         }
@@ -1343,7 +1374,8 @@ namespace ego_planner
     LocalTrajData *info = &planner_manager_->local_data_;
     auto map = planner_manager_->grid_map_;
 
-    if (exec_state_ == WAIT_TARGET || info->start_time_.toSec() < 1e-5)
+    if (exec_state_ == WAIT_TARGET || (bridge_mode_ && exec_state_ == SEQUENTIAL_START) ||
+        info->start_time_.toSec() < 1e-5)
       return;
 
     /* ---------- check lost of depth ---------- */
@@ -1517,7 +1549,94 @@ namespace ego_planner
     publishSwarmTrajs(true, false);
   }
 
-  void EGOReplanFSM::publishSwarmTrajs(bool startup_pub, bool broadcast)
+  bool EGOReplanFSM::getCurrentTrajectory(traj_utils::GetCurrentTrajectory::Request &,
+                                         traj_utils::GetCurrentTrajectory::Response &response)
+  {
+    response = traj_utils::GetCurrentTrajectory::Response();
+    response.valid = currentTrajectory(response.trajectory);
+    return true;
+  }
+
+  bool EGOReplanFSM::currentTrajectory(traj_utils::Bspline &trajectory)
+  {
+    if (!have_odom_ || exec_state_ != EXEC_TRAJ || (mission_gate_ && !mission_active_))
+      return false;
+    const auto now = ros::Time::now();
+    const auto &local = planner_manager_->local_data_;
+    if (local.start_time_.isZero() || now < local.start_time_ || !std::isfinite(local.duration_) ||
+        (now - local.start_time_).toSec() >= local.duration_)
+      return false;
+
+    auto spline = makeLocalSpline();
+    if (!usableBridgeSnapshot(spline, planner_manager_->pp_.drone_id, now, ros::Time(), 0.0))
+      return false;
+    trajectory = std::move(spline);
+    return true;
+  }
+
+  bool EGOReplanFSM::bridgeBroadcastTrajectory(traj_utils::Bspline &trajectory)
+  {
+    if (currentTrajectory(trajectory))
+      return true;
+
+    if (!bridge_goal_completed_ || exec_state_ != WAIT_TARGET || have_target_ ||
+        !have_odom_ || (mission_gate_ && !mission_active_) || odom_stamp_.isZero() ||
+        !odom_pos_.allFinite() || !odom_vel_.allFinite())
+      return false;
+
+    const double age = (ros::Time::now() - odom_stamp_).toSec();
+    constexpr double max_odom_age = 0.5;
+    constexpr double settled_speed = 0.2;
+    constexpr double endpoint_tolerance = 0.5;
+    constexpr double prediction_horizon = 2.0;
+    if (age < 0.0 || age > max_odom_age || odom_vel_.norm() > settled_speed ||
+        (odom_pos_ - end_pt_).norm() > endpoint_tolerance)
+      return false;
+
+    // A fresh, short-lived prediction from the measured position. Do not change
+    // the local spline or trajectory server, and do not revive the finished path.
+    trajectory = traj_utils::Bspline();
+    trajectory.drone_id = planner_manager_->pp_.drone_id;
+    trajectory.order = 3;
+    trajectory.traj_id = planner_manager_->local_data_.traj_id_;
+    trajectory.start_time = odom_stamp_;
+    for (int i = -3; i <= 4; ++i)
+      trajectory.knots.push_back(i * prediction_horizon);
+    geometry_msgs::Point point;
+    point.x = odom_pos_.x();
+    point.y = odom_pos_.y();
+    point.z = odom_pos_.z();
+    trajectory.pos_pts.assign(4, point);
+    return true;
+  }
+
+  void EGOReplanFSM::bridgeTrajectoryTick(const ros::TimerEvent &)
+  {
+    traj_utils::Bspline trajectory;
+    if (bridgeBroadcastTrajectory(trajectory))
+      broadcast_bspline_pub_.publish(trajectory);
+  }
+
+  void EGOReplanFSM::publishNeighborTrajectories(const ros::WallTimerEvent &)
+  {
+    constexpr double min_remaining = 0.1; // Match the optimizer's end-of-spline margin.
+    std_msgs::Int32MultiArray usable;
+    const auto now = ros::Time::now();
+    {
+      std::lock_guard<std::mutex> lock(planner_manager_->swarm_traj_mutex_);
+      for (const auto &peer : planner_manager_->swarm_trajs_buf_)
+      {
+        if (peer.drone_id <= 0 || peer.drone_id == planner_manager_->pp_.drone_id ||
+            peer.start_time_.isZero() || now < peer.start_time_)
+          continue;
+        if (peer.duration_ - (now - peer.start_time_).toSec() > min_remaining)
+          usable.data.push_back(peer.drone_id);
+      }
+    }
+    neighbor_trajectory_pub_.publish(usable);
+  }
+
+  traj_utils::Bspline EGOReplanFSM::makeLocalSpline()
   {
     auto info = &planner_manager_->local_data_;
 
@@ -1546,6 +1665,12 @@ namespace ego_planner
       bspline.knots.push_back(knots(i));
     }
 
+    return bspline;
+  }
+
+  void EGOReplanFSM::publishSwarmTrajs(bool startup_pub, bool broadcast)
+  {
+    const auto bspline = makeLocalSpline();
     if (startup_pub)
     {
       multi_bspline_msgs_buf_.drone_id_from = planner_manager_->pp_.drone_id; // zx-todo

@@ -22,7 +22,7 @@
 #include <deque>
 #include <mutex>
 #include <condition_variable>
-#include <set>
+#include <map>
 #include <stdexcept>
 #include <thread>
 #include <tuple>
@@ -347,8 +347,8 @@ class Bridge
     diagnostics_.publish(report);
   }
   using Key = std::tuple<int, int64_t, uint64_t>;
-  std::set<Key> seen_;
-  std::deque<Key> seen_order_;
+  std::map<Key, Clock::time_point> forwarded_;
+  std::deque<Key> forwarded_order_;
 
   bool running() const { return alive_ && ros::ok(); }
   bool connected() const
@@ -643,19 +643,28 @@ class Bridge
         continue;
       }
       observe(m, true);
-      // Trajectories are immutable for (sender, trajectory ID, start time).
-      Key k{h.sender, m.traj_id, m.start_time.toNSec()};
-      if (!seen_.insert(k).second)
+      // Throttle repeated copies without assuming that EGO accepted the first one.
+      const Key key{h.sender, m.traj_id, m.start_time.toNSec()};
+      const auto now = Clock::now();
+      auto entry = forwarded_.emplace(key, now);
+      if (!entry.second)
       {
-        std::lock_guard<std::mutex> lock(observations_mutex_);
-        ++observations_[h.sender].udp_duplicates;
-        continue;
+        {
+          std::lock_guard<std::mutex> lock(observations_mutex_);
+          ++observations_[h.sender].udp_duplicates;
+        }
+        if (now - entry.first->second < std::chrono::milliseconds(200))
+          continue;
+        entry.first->second = now;
       }
-      seen_order_.push_back(k);
-      if (seen_order_.size() > 256)
+      else
       {
-        seen_.erase(seen_order_.front());
-        seen_order_.pop_front();
+        forwarded_order_.push_back(key);
+        if (forwarded_order_.size() > 256)
+        {
+          forwarded_.erase(forwarded_order_.front());
+          forwarded_order_.pop_front();
+        }
       }
       single_rx_.publish(m); // Preserve the original trajectory time, never stamp now.
     }

@@ -3,7 +3,6 @@
 set -e
 
 export DISABLE_ROS1_EOL_WARNINGS=1
-
 source /opt/ros/noetic/setup.bash
 source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash

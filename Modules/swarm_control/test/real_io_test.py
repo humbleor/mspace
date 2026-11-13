@@ -22,7 +22,7 @@ from nav_msgs.msg import Odometry
 from mavros_msgs.msg import PositionTarget
 from prometheus_msgs.msg import DroneState, SwarmCommand
 from sensor_msgs.msg import Range
-from std_msgs.msg import Bool, Empty
+from std_msgs.msg import Bool, Empty, Int32MultiArray
 from traj_utils.msg import Bspline, MultiBsplines
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -182,6 +182,61 @@ class RuntimeTest(unittest.TestCase):
         self.addCleanup(p.unregister)
         return p
 
+    def test_bridge_speed_follows_usable_neighbor_trajectories(self):
+        self.launch("prometheus_swarm_control", "swarm_controller", "trajectory_speed_test",
+                    {"uav_id": 1, "swarm_num": 2, "controller_flag": 1,
+                     "controller_hz": 50.0, "flag_printf": False, "use_bridge": True})
+        cmd_pub = self.pub("/uav1/prometheus/swarm_command", SwarmCommand)
+        tcp_pub = self.pub("/uav1/bridge_connection_state", Bool)
+        health = self.pub("/uav1/planning/usable_neighbor_trajectories", Int32MultiArray)
+        targets = self.sub("/uav1/mavros/setpoint_raw/local", PositionTarget)
+        wait_for(lambda: all(p.get_num_connections() for p in (cmd_pub, tcp_pub, health)))
+        command = SwarmCommand(Mode=SwarmCommand.Move, Move_mode=SwarmCommand.TRAJECTORY)
+        command.velocity_ref = [2.0, 0.0, 0.0]
+        cmd_pub.publish(command)
+        tcp_pub.publish(Bool(data=True))
+
+        def steady_speed(value):
+            return len(targets) >= 8 and all(abs(m.velocity.x - value) < .02 for m in targets[-8:])
+
+        wait_for(lambda: steady_speed(1.0), reason="missing trajectory is degraded even with TCP up")
+        for _ in range(12):
+            health.publish(Int32MultiArray(data=[2]))
+            time.sleep(.15)
+        wait_for(lambda: steady_speed(2.0), reason="continuous healthy reports restore velocity")
+        tcp_pub.publish(Bool(data=False))
+        health.publish(Int32MultiArray(data=[2]))
+        time.sleep(.25)
+        self.assertTrue(steady_speed(2.0), "TCP disconnect changed the new velocity policy")
+
+        tcp_pub.publish(Bool(data=True))
+        health.publish(Int32MultiArray(data=[]))
+        wait_for(lambda: steady_speed(1.0), reason="explicit trajectory expiry degrades velocity")
+        health.publish(Int32MultiArray(data=[2]))
+        time.sleep(.6)
+        self.assertTrue(steady_speed(1.0), "single healthy report bypassed recovery confirmation")
+        for _ in range(12):
+            health.publish(Int32MultiArray(data=[2]))
+            time.sleep(.15)
+        wait_for(lambda: steady_speed(2.0), reason="trajectory recovered again")
+        wait_for(lambda: steady_speed(1.0), reason="stopped trajectory reports degrade velocity")
+
+    def test_bridge_heartbeat_timeout_and_recovery(self):
+        from rosgraph_msgs.msg import Log
+
+        logs = self.sub("/rosout", Log)
+        self.launch("prometheus_swarm_control", "swarm_controller", "bridge_heartbeat_test",
+                    {"uav_id": 1, "swarm_num": 1, "controller_flag": 1,
+                     "require_frame_ready": False, "flag_printf": False})
+        heartbeat = self.pub("/uav1/bridge_connection_state", Bool)
+        wait_for(lambda: heartbeat.get_num_connections())
+        heartbeat.publish(Bool(data=True))
+        wait_for(lambda: any(m.name == "/bridge_heartbeat_test" and "heartbeat missing" in m.msg
+                             for m in logs), timeout=5, reason="bridge consumer heartbeat timeout")
+        heartbeat.publish(Bool(data=True))
+        wait_for(lambda: any(m.name == "/bridge_heartbeat_test" and "heartbeat resumed" in m.msg
+                             for m in logs), reason="bridge consumer heartbeat recovery")
+
     def test_takeoff_height_lowercase_controls_synthetic_z_target(self):
         targets = self.sub("/test/takeoff_target", PositionTarget)
         self.launch("prometheus_swarm_control", "swarm_controller", "takeoff_test",
@@ -266,13 +321,27 @@ class RuntimeTest(unittest.TestCase):
             m=spline(tid=808);tx.publish(m)
             for peer in (first,second):self.assertEqual(peer.recv(60000),packet(2,1,m))
 
-    def test_two_real_planners_start_from_predecessor_without_local_trajectory(self):
+    def test_two_real_planners_start_from_udp_after_first_packet_loss(self):
+        self.check_udp_startup(late_follower=False)
+
+    def test_follower_starts_after_predecessor_finishes(self):
+        self.check_udp_startup(late_follower=True)
+
+    def check_udp_startup(self, late_follower):
+        from rosgraph_msgs.msg import Log
+
+        logs = self.sub("/rosout", Log)
         cfg = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=true", "rviz:=false")
         t1,t2,u1,u2 = port(),port(),port(socket.SOCK_DGRAM),port(socket.SOCK_DGRAM)
-        self.bridge(1,t1,t2,u1,u2,"startup_bridge_a")
+        relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(relay.close)
+        relay.bind(("127.0.0.1", 0))
+        relay.settimeout(8)
+        self.bridge(1,t1,t2,u1,relay.getsockname()[1],"startup_bridge_a")
         self.bridge(2,t2,t1,u2,u1,"startup_bridge_b")
         trajectories = {uid:self.sub("/uav%d/bridge/tx/bspline"%uid,Bspline) for uid in (1,2)}
         chains = self.sub("/uav2/bridge/rx/prev_multi_traj",MultiBsplines)
+        usable = self.sub("/uav2/planning/usable_neighbor_trajectories", Int32MultiArray)
         odom,goals = {},{}
         for uid in (1,2):
             node = next(n for n in cfg.nodes if n.name=="uav_%d_ego_planner_node"%uid)
@@ -295,14 +364,56 @@ class RuntimeTest(unittest.TestCase):
             time.sleep(.03)
         g=PoseStamped();g.pose.position=Point(2,6,1);g.pose.orientation.w=1.
         goals[2].publish(g)
-        time.sleep(.4)
-        self.assertFalse(trajectories[2],"UAV2 started without a predecessor")
+        wait_for(lambda: any(m.name == "/startup_planner_2" and "UDP startup waiting" in m.msg
+                             for m in logs), reason="UAV2 goal processed and waiting for UAV1")
+        self.assertFalse(trajectories[2], "UAV2 started without a predecessor")
+        wait_for(lambda: usable and not usable[-1].data, reason="missing predecessor is reported")
         g.pose.position=Point(2,0,1);goals[1].publish(g)
-        wait_for(lambda: trajectories[1] and chains and trajectories[2],timeout=15,
-                 reason="both real EGO planners started through TCP predecessor chain")
+        wait_for(lambda: trajectories[1] and chains, timeout=10,
+                 reason="UAV1's first trajectory and TCP predecessor chain")
+        first = relay.recv(60000)
+        self.assertFalse(trajectories[2], "TCP alone opened UAV2's startup gate")
+        if late_follower:
+            # Keep dropping UDP until the first path expires and UAV1 reports
+            # a new prediction at its measured, stationary endpoint.
+            initial = trajectories[1][0]
+            end = initial.start_time + rospy.Duration(
+                initial.knots[len(initial.pos_pts)] - initial.knots[3])
+            self.assertFalse(trajectories[2], "follower started without UDP")
+            wait_for(lambda: rospy.Time.now() > end, timeout=15, reason="initial UAV1 path to expire")
+            m = Odometry()
+            m.pose.pose.orientation.w = 1.
+            m.pose.pose.position = Point(2, 0, 1)
+            def stationary_prediction():
+                m.header.stamp = rospy.Time.now()
+                odom[1].publish(m)
+                return next((s for s in reversed(trajectories[1])
+                             if s.start_time > end and len(s.pos_pts) == 4
+                             and all(pt == m.pose.pose.position for pt in s.pos_pts)), None)
+            wait_for(stationary_prediction, reason="settled UAV1 advertises measured hold")
+            hold = stationary_prediction()
+            self.assertFalse(trajectories[2], "follower started from the expired path")
+            relay.sendto(packet(2, 1, hold), ("127.0.0.1", u2))
+            wait_for(lambda: trajectories[2], reason="UAV2 starts from fresh UAV1 hold")
+            return
+        replay = relay.recv(60000)
+        self.assertEqual(replay, first, "UDP replay changed the first trajectory")
+        relay.sendto(replay, ("127.0.0.1", u2))
+        wait_for(lambda: trajectories[2], reason="UAV2 starts after the UDP replay")
+        wait_for(lambda: usable and 1 in usable[-1].data, reason="accepted trajectory is reported")
         self.assertEqual(chains[0].drone_id_from,1)
         self.assertEqual(len(chains[0].traj),2)
         self.assertEqual(chains[0].traj[1].drone_id,1)
+        from traj_utils.srv import GetCurrentTrajectory
+        for uid in (1, 2):
+            service = "/startup_planner_%d/planning/get_current_trajectory" % uid
+            rospy.wait_for_service(service, timeout=3)
+            response = rospy.ServiceProxy(service, GetCurrentTrajectory)()
+            self.assertTrue(response.valid, "active planner did not export its trajectory")
+            self.assertEqual(response.trajectory.drone_id, uid)
+            self.assertEqual(response.trajectory.traj_id, trajectories[uid][-1].traj_id)
+            self.assertEqual(response.trajectory.start_time, trajectories[uid][-1].start_time)
+        wait_for(lambda: usable and not usable[-1].data, reason="expired trajectory leaves usable set")
 
     def test_slow_tcp_peer_does_not_block_ros_callback(self):
         proc = self.launch("rosmsg_tcp_bridge", "bridge_sender_test", "bridge_slow_peer",
@@ -364,8 +475,8 @@ class RuntimeTest(unittest.TestCase):
         time.sleep(.4)
         self.assertEqual(len(rxm),1,"RX must not be fed back to TX")
         txu.publish(m)
-        time.sleep(.2)
-        self.assertEqual(len(rxu),1,"duplicate immutable trajectory must not republish")
+        wait_for(lambda: len(rxu) == 2, reason="spaced UDP replay is forwarded")
+        self.assertEqual(rxu[-1], m, "bridge modified the retransmitted trajectory")
         stop(b)
         wait_for(lambda: states and not states[-1].data,reason="disconnect state")
         b = self.bridge(2,t2,t1,u2,u1,"bridge_b_restart")
@@ -376,7 +487,7 @@ class RuntimeTest(unittest.TestCase):
         self.assertIsNone(a.poll())
         self.assertIsNone(b.poll())
 
-    def test_three_uav_periodic_chain_keeps_newer_udp_and_successor(self):
+    def test_three_uav_udp_gate_rejects_expired_or_older_trajectories(self):
         proc=self.launch("ego_planner","bridge_chain_test","chain_merge_test",{})
         self.assertEqual(proc.wait(timeout=8),0,"actual EGO chain callback regression failed; see chain_merge_test.log")
 

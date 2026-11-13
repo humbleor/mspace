@@ -31,6 +31,23 @@ def config(n=3):
 
 
 class FleetTests(unittest.TestCase):
+    def test_slow_sitl_scales_wall_receive_timeout_only(self):
+        import yaml
+
+        template = ROOT / "Modules/swarm_control/launch/frame_adapter.yaml"
+        original = yaml.safe_load(template.read_text())
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            prepare_modules(ROOT, out, [[0, 0, 1.2], [1, 0, 1.2]],
+                            world_frame=True, simulation_speed=.1)
+            config = out / "frame_adapter_sitl.yaml"
+            generated = yaml.safe_load(config.read_text())
+            self.assertEqual(generated.pop("receive_timeout"), 5.0)
+            self.assertEqual(generated, {k: v for k, v in original.items() if k != "receive_timeout"})
+            launch = ET.parse(out / "modules.launch")
+            self.assertEqual(launch.find(".//arg[@name='frame_adapter_config']").get("value"), str(config))
+            self.assertEqual(float(launch.find(".//arg[@name='handover_feedback_receive_timeout']").get("value")), 5.0)
+
     def test_bridge_cli_and_three_vehicle_generated_ports(self):
         from run_swarm import parser
         args=["--fleet","fleet.json","--output","run"]
@@ -54,6 +71,8 @@ class FleetTests(unittest.TestCase):
                 planner=ET.parse(out/"planner_modules.launch").getroot()
                 self.assertEqual(planner.find("arg[@name='use_bridge']").get("value"),"true")
                 wrapper=ET.parse(out/"modules.launch").getroot()
+                control = next(e for e in wrapper.findall("include") if "ego_swarm_control.launch" in e.get("file"))
+                self.assertEqual(control.find("arg[@name='use_bridge']").get("value"), "true")
                 include=next(e for e in wrapper.findall("include") if "rosmsg_tcp_bridge" in e.get("file"))
                 values={e.get("name"):e.get("value") for e in include.findall("arg")}
                 self.assertEqual(int(values["uav_id"]),v.uav_id)

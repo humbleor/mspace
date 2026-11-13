@@ -40,13 +40,21 @@ rostopic echo /uav2/bridge/diagnostics
 - 尚未观察到数据时年龄为 -1；重复合法包刷新接收观测，但不修改轨迹原始时间或延长其寿命。
 - 诊断只是桥的结构校验与时间观测，不表示 EGO 接受、坐标一致或任务可继续。ROS 时间跳变、重新定位后的业务失效尚未在本轮实现。
 
-`bridge_connection_state` 仍保持原 TCP 拓扑语义；控制器失联动作、PX4 参数和任务恢复策略没有改变。
+`bridge_connection_state` 表示 TCP 拓扑。桥模式控制器使用 EGO 的 `/uavN/planning/usable_neighbor_trajectories`（`std_msgs/Int32MultiArray`）。EGO 每 0.2 秒墙钟发布一次，数组只列出已接纳且剩余时域大于 0.1 ROS 秒的邻机编号。控制器按 `swarm_num` 检查所有其他成员，缺少任一成员或 2 秒墙钟内无状态更新时，将速度设定值平滑降至 0.5 倍。持续收到完整状态至少 0.5 秒墙钟后恢复 1.0 倍。PX4 的位置设定值仍参与轨迹跟踪，实际飞行速度由飞控闭环决定。
+
+## UDP 启动与补发
+
+`use_bridge` 模式下，EGO 首次规划依据从 UDP 收到的有效前驱轨迹。每架机广播自己的轨迹，后机在本地按编号等待前驱。EGO 每 0.5 个 ROS 秒检查一次，只补发本机正在执行且仍有效的轨迹，保留原始轨迹 ID 和起始时间。桥统计重复包，同一轨迹键的重复转发间隔至少为 200 毫秒墙钟。规划器按原始起始时间和样条时域判断有效性。
+
+前机正常完成任务且仍有有效里程计时，如果当前位置距终点不超过 0.5 m、速度不超过 0.2 m/s，且里程计时间戳距现在不超过 0.5 ROS 秒，EGO 每 0.5 ROS 秒广播一次基于实测位置的 2 秒静止预测。后机可据此启动，旧运动轨迹仍按时过期。退出任务、里程计过期或飞机开始移动后停止刷新；该预测不发送给本机轨迹执行器，也不作为查询服务的执行中轨迹返回。
+
+实机双主机须在进入 OFFBOARD 前完成系统时钟同步，并确认机间相对偏差低于 `~fsm/bridge_clock_bound`（默认 0.10 秒；范围 0–0.25 秒）。这是部署时核实的误差预算，节点不会测量或补偿实际偏差。桥模式允许缓存预算内略微超前的包，到其起始时刻才计入启动和邻机健康状态；有效截止时间预留同样的误差预算。补发仍按轨迹剩余时域判断，不要求所有 UDP 包都在起始后 0.25 秒内抵达。
 
 ## TCP 发送
 
 ROS 回调仅校验、编码和交接，已有 sender 线程独占 TCP socket。最多一帧在发、一帧待发；仅替换未开始发送的待发帧，单帧最大沿用原 1 MiB payload 上限。部分写保持帧完整性，沿用约 200 ms 发送截止时间；失败断开并清空队列。
 
-本地连接代次检查防止编码期间跨重连交接旧帧。重连不重放队列，仍通过原 request_current 请求 EGO 重建当前有效链；它没有新增单机 TCP 快照接口，也不解决原 UDP 接收回调的 0.25 s 起始时间门限。
+本地连接代次检查防止编码期间跨重连交接旧帧。重连不重放队列，仍通过原 request_current 请求 EGO 重建当前有效链。当前桥模式的 EGO 通过 UDP 接收路径判断前驱轨迹是否可用于首次规划。
 
 ## 验证
 
@@ -57,8 +65,27 @@ bash Modules/swarm_control/test/run_frame_tests.sh
 python3 Simulation/run.py test
 ```
 
-测试脚本使用自己的隔离 Master；运行前加载环境，检查 compile.sh 最终汇总。新增测试覆盖错误启动链、双机仿真 remap、两台真实 EGO 规划进程顺序启动、诊断时效与重复包、慢 TCP 对端、发送截止时间、断线清空和重连不重放。
+测试脚本使用自己的隔离 Master；运行前加载环境，检查 compile.sh 最终汇总。新增测试覆盖UDP 启动门控、双机仿真 remap、两台 EGO 进程在首个 UDP 包漏收后的顺序启动、诊断时效与重复包、慢 TCP 对端、发送截止时间、断线清空和重连不重放。
 
 2026-11-03：完整六模块构建、通信/接口 15 项、坐标 launch 4 项与 ROS adapter 7 项通过；Simulation/run.py test 的三组 33/31/80 项通过。完整双机 Mid-360 桥模式无 GUI 冒烟中，两机均产生/接收轨迹并运动，未发现 /broadcast_bspline 发布旁路，两台桥退出码均为 0。
 
 冒烟只覆盖启动和初始运动；运行日志出现原 EGO 0.25 s 轨迹时间门限拒收，退出时还出现 boost mutex 异常，原直连模式对照也复现，具体仿真组件尚未定位。不能据此声称完整任务、弱网避碰或实机飞行已验证。双主机真实网络地面测试仍需部署环境执行。
+
+
+## Consumer diagnostics and local trajectory query
+
+The controller warns if a previously observed bridge status heartbeat stops for over
+two wall seconds. This diagnostic does not alter the bridge-mode speed policy.
+EGO excludes expired predictions from the usable-neighbor report.
+
+The bridge-mode EGO node offers a read-only local ROS service, for example:
+
+```bash
+rosservice call /uav_1_ego_planner_node/planning/get_current_trajectory "{}"
+```
+
+A valid response contains the executing spline with its original ID and start time.
+The query does not depend on the predecessor chain. The local snapshot validation
+contract requires the caller to verify peer identity, coordinate epoch and clock
+uncertainty before calling it. Network snapshot exchange and cache invalidation
+are separate follow-up work. The non-bridge direct ROS path keeps the 0.25 s window.

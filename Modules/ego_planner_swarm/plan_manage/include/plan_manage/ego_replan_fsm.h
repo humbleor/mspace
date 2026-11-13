@@ -22,6 +22,7 @@
 #include <traj_utils/DataDisp.h>
 #include <plan_manage/planner_manager.h>
 #include <traj_utils/planning_visualization.h>
+#include <traj_utils/GetCurrentTrajectory.h>
 
 using std::vector;
 
@@ -76,6 +77,8 @@ namespace ego_planner
     bool strict_waypoint_tracking_; // Confirm each mission point from odometry.
     bool enable_fail_safe_;
     bool bridge_mode_ = false;
+    bool bridge_goal_completed_ = false;
+    double bridge_clock_bound_ = 0.1;
     bool mission_gate_ = false, mission_active_ = false, mission_initialized_ = false;
     ros::Time odom_stamp_, mission_start_time_, mission_stop_time_;
     ros::Subscriber mission_start_sub_, mission_stop_sub_;
@@ -103,6 +106,10 @@ namespace ego_planner
     ros::NodeHandle node_;
     ros::Timer exec_timer_, safety_timer_;
     ros::Subscriber bridge_request_sub_;
+    ros::ServiceServer current_trajectory_service_;
+    ros::Timer bridge_trajectory_timer_;
+    ros::WallTimer neighbor_trajectory_timer_;
+    ros::Publisher neighbor_trajectory_pub_;
     ros::Subscriber waypoint_sub_, odom_sub_, swarm_trajs_sub_, broadcast_bspline_sub_, trigger_sub_;
     ros::Publisher replan_pub_, new_pub_, bspline_pub_, data_disp_pub_, swarm_trajs_pub_, broadcast_bspline_pub_;
 
@@ -132,6 +139,7 @@ namespace ego_planner
     int  generateSpiralWaypoints(double X, double Y, double R, int number, double minZ, double maxZ, double stepZ);
 
     /* ROS functions */
+    bool predecessorsReady(const ros::Time &now) const;
     void execFSMCallback(const ros::TimerEvent &e);
     void checkCollisionCallback(const ros::TimerEvent &e);
     void waypointCallback(const geometry_msgs::PoseStampedPtr &msg);
@@ -143,6 +151,13 @@ namespace ego_planner
     bool checkCollision();
     void publishSwarmTrajs(bool startup_pub, bool broadcast = true);
     void bridgeRequestCallback(const std_msgs::EmptyConstPtr &msg);
+    traj_utils::Bspline makeLocalSpline();
+    bool getCurrentTrajectory(traj_utils::GetCurrentTrajectory::Request &,
+                              traj_utils::GetCurrentTrajectory::Response &response);
+    bool currentTrajectory(traj_utils::Bspline &trajectory);
+    bool bridgeBroadcastTrajectory(traj_utils::Bspline &trajectory);
+    void bridgeTrajectoryTick(const ros::TimerEvent &);
+    void publishNeighborTrajectories(const ros::WallTimerEvent &);
 
   public:
     EGOReplanFSM(/* args */)
