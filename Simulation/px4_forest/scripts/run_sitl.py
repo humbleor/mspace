@@ -101,6 +101,38 @@ def main():
         help="Pre-extracted geometry.json matching this local PCD hash",
     )
     ap.add_argument(
+        "--trunk-params",
+        type=Path,
+        help="Online TrunkMapper CSV snapshot used instead of offline PCD extraction",
+    )
+    ap.add_argument(
+        "--trunk-z-offset",
+        type=float,
+        default=0.0,
+        help="Added to online trunk z to align the LIO origin with the scene local frame",
+    )
+    ap.add_argument(
+        "--trunk-from-source",
+        action="store_true",
+        help="Online trunk CSV is in the source bag world and needs the scene transform",
+    )
+    ap.add_argument(
+        "--trunk-assume-local-frame",
+        action="store_true",
+        help="Treat a frame_id=world trunk CSV as already in the scene local frame",
+    )
+    ap.add_argument(
+        "--trunk-min-observations",
+        type=int,
+        default=2,
+        help="Drop online tracks seen by fewer batches (default 2)",
+    )
+    ap.add_argument(
+        "--dump-trunk-params",
+        type=Path,
+        help="Write online TrunkMapper CSV snapshots to this path during the run",
+    )
+    ap.add_argument(
         "--no-tree-collision",
         action="store_true",
         help="Explicit legacy comparison: disable physical tree collision",
@@ -233,7 +265,26 @@ def main():
         local_map = to_local(read_pcd(scene["map"]), map_origin, world_R)
         renderer = BVHRenderer(local_map, threads=4, surface_model=a.surface_model)
         if not a.no_tree_collision:
-            if a.forest_geometry:
+            if a.forest_geometry and a.trunk_params:
+                raise ValueError("Use either --forest-geometry or --trunk-params")
+            if a.trunk_params:
+                from geometry_from_trunks import geometry_from_trunks
+
+                print(
+                    "Using online trunk parameters: " + str(a.trunk_params),
+                    flush=True,
+                )
+                geometry = geometry_from_trunks(
+                    a.scene,
+                    a.trunk_params,
+                    local_map,
+                    takeoff_height=a.takeoff_height,
+                    z_offset=a.trunk_z_offset,
+                    transform_from_source=a.trunk_from_source,
+                    assume_local_frame=a.trunk_assume_local_frame,
+                    min_observations=a.trunk_min_observations,
+                )
+            elif a.forest_geometry:
                 geometry = json.loads(a.forest_geometry.read_text())
                 print(
                     "Using cached forest geometry: " + str(a.forest_geometry),
@@ -279,8 +330,18 @@ def main():
         E = np.asarray(cfg["mapping"]["extrinsic_R"]).reshape(3, 3)
         coverage = CoverageMap.load(scene["coverage"])
     if a.stage == "forest":
+        trunk_dump = None
+        if a.dump_trunk_params:
+            a.dump_trunk_params.parent.mkdir(parents=True, exist_ok=True)
+            trunk_dump = a.dump_trunk_params.resolve()
         module_info = prepare_modules(
-            ROOT, out, goals, waypoint_config, world_frame=a.world_frame
+            ROOT,
+            out,
+            goals,
+            waypoint_config,
+            world_frame=a.world_frame,
+            simulation_speed=a.speed,
+            trunk_dump=trunk_dump,
         )
         write_json(out / "module_alignment.json", module_info)
     ports = {

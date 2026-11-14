@@ -22,6 +22,26 @@
 
 ---
 
+## 实机在线树干模式
+
+Fast-LIO2 已能在线提取树干并发布结构化话题。实机可让本模块直接消费 LIO 的结果，不再运行内部的 PCA/PatchWork++ 检测器：
+
+```bash
+# LIO 侧：启用树干提取并发布 /uavN/tree_trunks_data
+roslaunch fast_lio mapping_mid360.launch uav_id:=1 enable_world_frame:=true \
+  tree_trunks:=true
+
+# 检测侧：订阅外部树干并转成 TreeDetection，tree_loc_node 不变
+roslaunch drone_detect_lidar drone_detect_lidar.launch drone_id:=1 \
+  use_external_trunks:=true
+```
+
+`tree_detector_node` 在 `use_external_trunks=true` 时订阅 `~external_trunks`（launch 中重映射到 `/uavN/tree_trunks_data`），按 `external_min_observations`（默认 2）过滤后发布原有 `TreeDetection`。树干坐标与该机 odom 同处一个 LIO 坐标系，多机三角形匹配仍然估计机间变换。
+
+注意：现有的 `ego_fastlio2_one_livox.sh` / `ego_fastlio2_swarm_uav1.sh` **没有自动启用** `tree_trunks`，也**没有启动**本节点；实机多机还需要 neighbor odom/tree relay 与网络配置。当前这些入口需要按上面的命令手动接入，仿真入口仍走 `pcd_render_node` 的旧检测器。
+
+---
+
 ## 目录结构
 
 ```

@@ -8,6 +8,10 @@
   <arg name="uav_num" default="3"/>
   <arg name="odom_topic" default="lidar_slam/odom"/>
 
+  <!-- 实机: 树干由 fast_lio 在线提取，本节点只做消息转换; 仿真保持 false -->
+  <arg name="use_external_trunks" default="false"/>
+  <arg name="external_min_observations" default="2"/>
+
   <!-- 计算参数 -->
   <arg name="compute_frequency" default="5.0"/>
 
@@ -40,8 +44,11 @@
     <param name="broadcast_ip" value="$(arg broadcast_ip)"/>
     <param name="broadcast_port" value="$(arg broadcast_port)"/>
     <param name="frame_id" value="world"/>
+    <param name="use_external_trunks" value="$(arg use_external_trunks)"/>
+    <param name="external_min_observations" value="$(arg external_min_observations)"/>
 
     <remap from="~lidar_cloud" to="/uav$(arg drone_id)/pcl_render_node/cloud"/>
+    <remap from="~external_trunks" to="/uav$(arg drone_id)/tree_trunks_data"/>
     <remap from="~odom" to="/uav$(arg drone_id)/$(arg odom_topic)"/>
     <remap from="~tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
     <remap from="~tree_cloud" to="/uav$(arg drone_id)/tree_cloud"/>

@@ -25,6 +25,7 @@
   <depend>tf2_ros</depend>
   <depend>eigen_conversions</depend>
   <depend>gtsam</depend>
+  <depend>fast_lio</depend>
 
   <export>
   </export>

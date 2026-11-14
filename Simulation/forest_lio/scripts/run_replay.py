@@ -82,6 +82,11 @@ def main():
     ap.add_argument("--config", type=Path)
     ap.add_argument("--rate", type=float, default=0.5)
     ap.add_argument(
+        "--trunk-dump",
+        type=Path,
+        help="Write online TrunkMapper CSV snapshots to this path during replay",
+    )
+    ap.add_argument(
         "--duration", type=float, help="Seconds from first raw sensor record"
     )
     ap.add_argument("--map-voxel", type=float, default=0.15)
@@ -111,6 +116,9 @@ def main():
     args.output = args.output.resolve()
     for name in ("Log", "PCD", "ros_home"):
         (args.output / name).mkdir(parents=True, exist_ok=True)
+    if args.trunk_dump:
+        args.trunk_dump = args.trunk_dump.resolve()
+        args.trunk_dump.parent.mkdir(parents=True, exist_ok=True)
     config = (args.config or root / "Modules/fast_lio2/config/mid360.yaml").resolve()
     shutil.copyfile(config, args.output / "input_config.yaml")
     if args.map_window and not 0 <= args.map_window[0] < args.map_window[1]:
@@ -250,7 +258,15 @@ def main():
                 "imu_topic:=" + args.imu_topic,
                 "output_root:=" + str(args.output),
                 "config:=" + str(config),
-            ],
+            ]
+            + (
+                [
+                    "tree_trunks:=true",
+                    "tree_trunk_dump:=" + str(args.trunk_dump.resolve()),
+                ]
+                if args.trunk_dump
+                else []
+            ),
             "mapping.log",
         )
         deadline = time.monotonic() + 45

@@ -7,12 +7,16 @@
   <arg name="filter_size" default="0.5"/>
   <arg name="save_pcd" default="false"/>
   <arg name="pcd_interval" default="100"/>
+  <arg name="tree_trunks" default="false"/>
+  <arg name="tree_trunk_dump" default=""/>
   <param name="use_sim_time" value="true"/>
   <group ns="forest_lio_replay">
     <rosparam command="load" file="$(arg config)"/>
     <param name="output_root" value="$(arg output_root)"/>
     <param name="common/lid_topic" value="$(arg lidar_topic)"/>
     <param name="common/imu_topic" value="$(arg imu_topic)"/>
+    <param name="tree_trunks/enabled" value="$(arg tree_trunks)"/>
+    <param name="tree_trunks/dump_path" value="$(arg tree_trunk_dump)"/>
     <param name="feature_extract_enable" value="false"/>
     <param name="point_filter_num" value="$(arg point_filter_num)"/>
     <param name="max_iteration" value="3"/>

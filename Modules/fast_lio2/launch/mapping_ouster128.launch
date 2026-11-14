@@ -1,6 +1,9 @@
 <launch>
 <!-- Launch file for ouster OS2-64 LiDAR -->
     <arg name="uav_id" default="1"/>
+    <arg name="tree_trunks" default="false"/>
+    <arg name="tree_trunk_window_sec" default="2.0"/>
+    <arg name="tree_trunk_dump" default=""/>
     <rosparam command="load" file="$(find fast_lio)/config/ouster128.yaml" />
 
     <param name="feature_extract_enable" type="bool" value="0"/>
@@ -11,6 +14,11 @@
     <param name="filter_size_map" type="double" value="0.5" />
     <param name="cube_side_length" type="double" value="10" />
     <param name="runtime_pos_log_enable" type="bool" value="0" />
+    <param name="tree_trunks/enabled" type="bool" value="$(arg tree_trunks)"/>
+    <param name="tree_trunks/window_sec" type="double" value="$(arg tree_trunk_window_sec)"/>
+    <param name="tree_trunks/dump_path" type="string" value="$(arg tree_trunk_dump)"/>
+    <remap from="tree_trunks" to="/uav$(arg uav_id)/tree_trunks"/>
+    <remap from="tree_trunks_data" to="/uav$(arg uav_id)/tree_trunks_data"/>
 
     <remap from="/drone_cloud_registered" to="/uav$(arg uav_id)/drone_cloud_registered"/>
     <remap from="/drone_cloud_registered_body" to="/uav$(arg uav_id)/drone_cloud_registered_body"/>

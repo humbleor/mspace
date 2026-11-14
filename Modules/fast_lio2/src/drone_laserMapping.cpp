@@ -34,6 +34,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 #include <omp.h>
 #include <mutex>
+#include <memory>
 #include <math.h>
 #include <thread>
 #include <fstream>
@@ -58,6 +59,7 @@
 #include <geometry_msgs/Vector3.h>
 #include <livox_ros_driver2/CustomMsg.h>
 #include "preprocess.h"
+#include "trunk_worker.h"
 #include <ikd-Tree/ikd_Tree.h>
 #include <gflags/gflags.h>
 #include <unistd.h>
@@ -1025,6 +1027,9 @@ int main(int argc, char **argv)
     nh.param<std::string>("frames/world", world_frame, "world");
     nh.param<std::string>("frames/body", body_frame, "body");
     nh.param<std::string>("frames/high_freq_body", high_freq_body_frame, "base_link");
+    std::unique_ptr<fast_lio_trunks::TrunkWorker> trunk_worker;
+    if (nh.param("tree_trunks/enabled", false))
+        trunk_worker.reset(new fast_lio_trunks::TrunkWorker(nh, world_frame));
 
     nh.param<bool>("publish/path_en", path_en, true);
     nh.param<bool>("publish/scan_publish_en", scan_pub_en, true);
@@ -1284,12 +1289,25 @@ int main(int argc, char **argv)
                          << " " << state_point.bg.transpose() << " " << state_point.ba.transpose() << " " << state_point.grav << " " << feats_undistort->points.size() << endl;
                 dump_lio_state_to_log(fp);
             }
+
+            if (trunk_worker)
+            {
+                Eigen::Isometry3f world_from_lidar = Eigen::Isometry3f::Identity();
+                world_from_lidar.linear() =
+                    (state_point.rot * state_point.offset_R_L_I).toRotationMatrix().cast<float>();
+                world_from_lidar.translation() = pos_lid.cast<float>();
+                const Eigen::Vector3f up = -state_point.grav.get_vect().cast<float>();
+                // Transfer the deskewed scan after all other consumers finish reading it.
+                trunk_worker->submit(feats_undistort, world_from_lidar, up, lidar_end_time);
+                feats_undistort.reset(new PointCloudXYZI());
+            }
         }
 
         status = ros::ok();
         rate.sleep();
     }
 
+    trunk_worker.reset();
     /**************** save map ****************/
     /* 1. make sure you have enough memories
     /* 2. pcd save will largely influence the real-time performences **/

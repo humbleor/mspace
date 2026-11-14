@@ -49,6 +49,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   rospy
   std_msgs
+  visualization_msgs
   pcl_ros
   tf
   livox_ros_driver2
@@ -71,20 +72,31 @@ include_directories(
 add_message_files(
   FILES
   Pose6D.msg
+  TreeCylinder.msg
+  TreeCylinderArray.msg
 )
 
 generate_messages(
  DEPENDENCIES
  geometry_msgs
+ std_msgs
 )
 
 catkin_package(
-  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs message_runtime
+  CATKIN_DEPENDS geometry_msgs nav_msgs roscpp rospy std_msgs visualization_msgs message_runtime
   DEPENDS EIGEN3 PCL
   INCLUDE_DIRS
 )
 
-add_executable(fastlio_mapping src/drone_laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
+add_executable(fastlio_mapping src/drone_laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp
+  src/preprocess.cpp src/trunk_mapper.cpp src/trunk_worker.cpp)
 add_dependencies(fastlio_mapping ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 target_link_libraries(fastlio_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_gtest(trunk_mapper_test test/trunk_mapper_test.cpp src/trunk_mapper.cpp)
+  if(TARGET trunk_mapper_test)
+    target_link_libraries(trunk_mapper_test ${catkin_LIBRARIES} ${PCL_LIBRARIES})
+  endif()
+endif()

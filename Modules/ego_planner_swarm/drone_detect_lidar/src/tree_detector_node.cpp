@@ -3,10 +3,12 @@
 #include <nav_msgs/Odometry.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/filters/voxel_grid.h>
+#include <algorithm>
 #include <mutex>
 #include "drone_detect_lidar/tree_detector.h"
 #include "drone_detect_lidar/Tree.h"
 #include "drone_detect_lidar/TreeDetection.h"
+#include "fast_lio/TreeCylinderArray.h"
 
 using namespace drone_detect_lidar;
 
@@ -25,12 +27,16 @@ public:
 
     loadParameters();
 
-    detector_.reset(new TreeDetector(detector_config_));
-
-    cloud_sub_ = nh_.subscribe("lidar_cloud", 10,
-                               &TreeDetectorNode::cloudCallback, this);
-    odom_sub_ = nh_.subscribe("odom", 100,
-                              &TreeDetectorNode::odomCallback, this);
+    if (use_external_trunks_) {
+      external_trunk_sub_ = nh_.subscribe("external_trunks", 10,
+                                          &TreeDetectorNode::externalTrunkCallback, this);
+    } else {
+      detector_.reset(new TreeDetector(detector_config_));
+      cloud_sub_ = nh_.subscribe("lidar_cloud", 10,
+                                 &TreeDetectorNode::cloudCallback, this);
+      odom_sub_ = nh_.subscribe("odom", 100,
+                                &TreeDetectorNode::odomCallback, this);
+    }
 
     tree_detection_pub_ = nh_.advertise<drone_detect_lidar::TreeDetection>("tree_detection", 10);
     tree_cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("tree_cloud", 10);
@@ -49,6 +55,10 @@ private:
 
   int drone_id_;
   std::string frame_id_;
+
+  bool use_external_trunks_;
+  int external_min_observations_;
+  ros::Subscriber external_trunk_sub_;
 
   std::mutex odom_mutex_;
   bool has_odom_;
@@ -76,12 +86,43 @@ private:
     nh_.param("patchwork_min_range", detector_config_.patchwork_min_range, 0.5);
     nh_.param("accumulation_frame_count", accumulation_frame_count_, 3);
     if (accumulation_frame_count_ < 1) accumulation_frame_count_ = 0;  // 0 means no accumulation
+    nh_.param("use_external_trunks", use_external_trunks_, false);
+    nh_.param("external_min_observations", external_min_observations_, 2);
+    if (external_min_observations_ < 1) external_min_observations_ = 1;
   }
 
   void odomCallback(const nav_msgs::Odometry::ConstPtr& msg) {
     std::lock_guard<std::mutex> lock(odom_mutex_);
     last_odom_ = msg;
     has_odom_ = true;
+  }
+
+  // 实机模式：树干由 fast_lio 的 TrunkWorker 提取，这里只做消息转换。
+  // 树坐标与该机 odom 同处一个 LIO 坐标系，三角形匹配估计机间变换。
+  void externalTrunkCallback(const fast_lio::TreeCylinderArray::ConstPtr& msg) {
+    constexpr double kPi = 3.14159265358979323846;
+    std::vector<TreeInfo> trees;
+    trees.reserve(msg->trees.size());
+    for (const auto& c : msg->trees) {
+      if (static_cast<int>(c.observations) < external_min_observations_)
+        continue;
+      TreeInfo tree;
+      tree.id = c.id;
+      tree.x = c.x;
+      tree.y = c.y;
+      tree.z_base = c.z_base;
+      tree.height = c.height;
+      tree.diameter = 2.0 * c.radius;
+      const double coverage_conf = std::min(1.0, static_cast<double>(c.coverage) / kPi);
+      const double obs_conf = std::min(1.0, static_cast<double>(c.observations) / 2.0);
+      tree.confidence = coverage_conf * obs_conf;
+      trees.push_back(tree);
+    }
+    if (trees.empty()) {
+      ROS_WARN_THROTTLE(5.0, "[TreeDetectorNode] No confirmed trunks from external detections");
+      return;
+    }
+    publishTrees(trees, msg->header.stamp, msg->header.frame_id);
   }
 
   void cloudCallback(const sensor_msgs::PointCloud2::ConstPtr& msg) {

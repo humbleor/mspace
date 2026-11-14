@@ -2,12 +2,18 @@
   <arg name="uav_id" default="1"/>
   <arg name="enable_world_frame" default="false"/>
   <arg name="rviz" default="false"/>
+  <arg name="tree_trunks" default="false"/>
+  <arg name="tree_trunk_window_sec" default="2.0"/>
+  <arg name="tree_trunk_dump" default=""/>
   <arg name="lidar_topic" default="$(eval ('/uav'+str(arg('uav_id')) if arg('enable_world_frame') else '') + '/livox/lidar_192_168_2_174')"/>
   <arg name="imu_topic" default="$(eval ('/uav'+str(arg('uav_id')) if arg('enable_world_frame') else '') + '/livox/imu_192_168_2_174')"/>
   <group ns="$(eval 'uav'+str(arg('uav_id')) if arg('enable_world_frame') else '/')">
     <rosparam command="load" file="$(find fast_lio)/config/mid360.yaml"/>
     <param name="common/lid_topic" value="$(arg lidar_topic)"/>
     <param name="common/imu_topic" value="$(arg imu_topic)"/>
+    <param name="tree_trunks/enabled" type="bool" value="$(arg tree_trunks)"/>
+    <param name="tree_trunks/window_sec" type="double" value="$(arg tree_trunk_window_sec)"/>
+    <param name="tree_trunks/dump_path" type="string" value="$(arg tree_trunk_dump)"/>
     <param name="frames/world" value="$(eval 'uav'+str(arg('uav_id'))+'/lio_init' if arg('enable_world_frame') else 'world')"/>
     <param name="frames/body" value="$(eval 'uav'+str(arg('uav_id'))+'/lio_body' if arg('enable_world_frame') else 'body')"/>
     <param name="frames/high_freq_body" value="$(eval 'uav'+str(arg('uav_id'))+'/lio_body' if arg('enable_world_frame') else 'base_link')"/>
@@ -25,6 +31,8 @@
     <remap from="/drone_Odometry" to="/uav$(arg uav_id)/drone_Odometry"/>
     <remap from="/drone_Odom_high_freq" to="/uav$(arg uav_id)/drone_Odom_high_freq"/>
     <remap from="/drone_path" to="/uav$(arg uav_id)/drone_path"/>
+    <remap from="tree_trunks" to="/uav$(arg uav_id)/tree_trunks"/>
+    <remap from="tree_trunks_data" to="/uav$(arg uav_id)/tree_trunks_data"/>
     <node pkg="fast_lio" type="fastlio_mapping" name="laserMapping" output="screen"/>
     <node if="$(arg rviz)" launch-prefix="nice" pkg="rviz" type="rviz" name="drone_rviz_fastlio"
           args="-d $(find fast_lio)/rviz_cfg/loam_livox.rviz"/>

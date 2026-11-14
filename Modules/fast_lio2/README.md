@@ -191,3 +191,20 @@ The main structure of this UAV is 3d printed (Aluminum or PLA), the .stl file wi
 ## 6.Acknowledgments
 
 Thanks for LOAM(J. Zhang and S. Singh. LOAM: Lidar Odometry and Mapping in Real-time), [Livox_Mapping](https://github.com/Livox-SDK/livox_mapping), [LINS](https://github.com/ChaoqinRobotics/LINS---LiDAR-inertial-SLAM) and [Loam_Livox](https://github.com/hku-mars/loam_livox).
+
+## Mspace 在线树干提取
+
+Fast-LIO2 完成单帧去畸变和位姿更新后，把扫描和对应位姿交给树干后台线程。树干模块独立裁剪和降采样，不使用定位的 `filter_size_surf`。候选簇经局部法向筛选和圆柱拟合后，与已有地标按同一高度的轴线位置、方向和半径关联。只有新旧内点都支持更新后的圆柱时才保留结果。
+
+功能默认关闭，Mid-360 可按以下方式启用（Ouster 64/128 的对应 launch 也支持同样的参数）：
+
+```bash
+source devel/setup.bash
+roslaunch fast_lio mapping_mid360.launch tree_trunks:=true tree_trunk_window_sec:=2.0 rviz:=true
+```
+
+在 RViz 添加 `MarkerArray`，选择 `/uav1/tree_trunks`，Fixed Frame 用该节点的 LIO 坐标系（单机默认为 `world`）。启用 `enable_world_frame:=true` 时，模型仍在 `uavN/lio_init`，不会把各机的局部地图直接合并。其他 Fast-LIO2 入口也可在节点的 ROS 命名空间设置 `tree_trunks/enabled: true`；默认输出为同命名空间下的 `tree_trunks`（MarkerArray）和 `tree_trunks_data`（`fast_lio/TreeCylinderArray`，latched）。后者包含每棵树的 `id、x、y、z_base、height、radius、axis、coverage、observations`，供 `drone_detect_lidar` 做多机三角匹配；下游可用 `observations >= 2` 过滤单批观测。
+
+默认每批覆盖至多约 2 秒的激光时间；缓存达到 15,000 点时先合并重复体素，若仍超限则提前拟合（实际约 0.3 秒）。单批只要求约 0.35 rad 的圆周覆盖，完整覆盖度由跟踪器跨批次累积，因此运动中的窄弧观测也能进入跟踪。`tree_trunks/range_m` 默认 7 米，`tree_trunks/voxel_m` 默认 0.035 米。输入仍受雷达预处理抽点设置影响。队列满时丢弃较旧的扫描；每棵树最多保留 1,800 个内点，最多保留 512 个地标。圆柱高度是已观测范围。枝叶连接成的大簇、遮挡和非常稀疏的树干仍可能漏检。该输出用于结构地图和多机匹配，EGO-Planner 继续使用原有点云。
+
+建议用同一段绕树 bag 比较 2、5、10 秒窗口，检查同一地标的 ID、轴线和半径是否稳定。若早晚点云各自成弧却互相错开，应优先检查时间同步、外参和 LIO 相对位姿。可将 ROS 日志设为 DEBUG 查看每批点数和处理耗时；窗口本身不会校正跨帧位姿误差。

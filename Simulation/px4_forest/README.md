@@ -6,7 +6,7 @@
 
 森林入口包含 [独立距离验收](docs/collision_acceptance.md) 与 [森林物理碰撞](docs/forest_physical_collision.md)：名义距离读取 EGO 实际参数；拟合树干及通过支撑筛选的连接枝段接入 Iris 真实接触，接触即判失败。雷达仍使用完整 PCD，未拟合的几何仍是覆盖限制。
 
-树干提取采用[多尺度覆盖补检](docs/trunk_extraction.md)，保留无地面证据但有实测支撑的树段，按稀疏程度调整法线筛选、跨尺度去重并记录候选诊断；支持倾斜、弯曲分段和有限地面补全，不输出独立短段。
+树干提取采用[多尺度覆盖补检](docs/trunk_extraction.md)，保留无地面证据但有实测支撑的树段，按稀疏程度调整法线筛选、跨尺度去重并记录候选诊断；支持倾斜、弯曲分段和有限地面补全，不输出独立短段。也可用在线 `TrunkMapper` 的树干参数生成碰撞几何：推荐真实 bag 回放 `--trunk-dump` 产 CSV，`geometry_from_trunks.py --transform-from-source` 转到场景系，再 `--forest-geometry` 或 `--trunk-params --trunk-from-source` 加载；具体见同一文档的“在线感知结果驱动”。
 
 入口在 `Simulation/px4_forest/`，传感器渲染与森林场景数据继续复用 `Simulation/forest_lio/`。
 

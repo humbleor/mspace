@@ -109,6 +109,7 @@ def prepare_modules(
     sensor_prefix="/sim",
     bridge=None,
     simulation_speed=None,
+    trunk_dump=None,
 ):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root, out = Path(root), Path(out)
@@ -136,6 +137,9 @@ def prepare_modules(
     )
     ET.SubElement(lio, "arg", name="uav_id", value=str(uav_id))
     ET.SubElement(lio, "arg", name="rviz", value="false")
+    if trunk_dump is not None:
+        ET.SubElement(lio, "arg", name="tree_trunks", value="true")
+        ET.SubElement(lio, "arg", name="tree_trunk_dump", value=str(trunk_dump))
     if world_frame:
         # World mode derives sensor topics from the namespace, so bind them directly.
         ET.SubElement(lio, "arg", name="enable_world_frame", value="true")

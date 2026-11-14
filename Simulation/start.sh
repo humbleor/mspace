@@ -26,6 +26,12 @@ Options for flight modes (relative paths use the project root):
   --obstacle-radius METRES  Proxy mode obstacle sphere (default/minimum 0.2).
   --max-truth-gap SECONDS  Collision evidence sampling limit (default 0.05).
   --forest-geometry PATH  Reuse a matching extracted geometry.json.
+  --trunk-params PATH     Use an online TrunkMapper CSV for collision geometry.
+  --trunk-z-offset M      Add to online trunk z to align LIO with the scene frame.
+  --trunk-from-source     Online CSV is in the source bag world; apply the scene transform.
+  --trunk-assume-local-frame  Treat a frame_id=world CSV as scene-local.
+  --trunk-min-observations N  Drop online tracks seen by fewer batches (default 2).
+  --dump-trunk-params PATH  Write online TrunkMapper CSV snapshots during the run.
   --no-tree-collision     Explicit comparison with physical tree collision disabled.
   --keep-contact-open     Pause on tree contact and preserve GUI for inspection.
   --gui both|gazebo|rviz|none   Default both; --headless selects none.
@@ -47,6 +53,8 @@ speed=.5; duration=""; output=""; waypoints=""; instance=20; gui=both; keep_open
 body_radius=.4; obstacle_radius=.2; max_truth_gap=.05
 collision_model=ego
 forest_geometry=""; tree_collision=1; keep_contact_open=0
+trunk_params=""; trunk_z_offset=0; trunk_from_source=0; trunk_assume_local=0
+trunk_min_observations=2; dump_trunk_params=""
 swarm_args=()
 if [[ "$mode" == swarm ]]; then
   swarm_args=("$@")
@@ -71,6 +79,12 @@ while [[ $# -gt 0 ]]; do
     --obstacle-radius) need_value "$@"; obstacle_radius="$2"; shift 2 ;;
     --max-truth-gap) need_value "$@"; max_truth_gap="$2"; shift 2 ;;
     --forest-geometry) need_value "$@"; forest_geometry="$2"; shift 2 ;;
+    --trunk-params) need_value "$@"; trunk_params="$2"; shift 2 ;;
+    --trunk-z-offset) need_value "$@"; trunk_z_offset="$2"; shift 2 ;;
+    --trunk-from-source) trunk_from_source=1; shift ;;
+    --trunk-assume-local-frame) trunk_assume_local=1; shift ;;
+    --trunk-min-observations) need_value "$@"; trunk_min_observations="$2"; shift 2 ;;
+    --dump-trunk-params) need_value "$@"; dump_trunk_params="$2"; shift 2 ;;
     --no-tree-collision) tree_collision=0; shift ;;
     --keep-contact-open) keep_contact_open=1; shift ;;
     --gui) need_value "$@"; gui="$2"; shift 2 ;;
@@ -144,6 +158,13 @@ command=(python3 "$PROJECT_ROOT/Simulation/run.py" px4 run --stage "$stage" --ou
          --duration "$duration" --speed "$speed" --instance "$instance" --gui "$gui")
 if [[ "$stage" == forest ]]; then command+=(--world-frame --scene "$scene" --template-bag "$bag" --collision-model "$collision_model" --body-radius "$body_radius" --obstacle-radius "$obstacle_radius" --max-truth-gap "$max_truth_gap" "${mission[@]}"); fi
 if [[ -n "$forest_geometry" ]]; then command+=(--forest-geometry "$forest_geometry"); fi
+if [[ -n "$trunk_params" ]]; then
+  command+=(--trunk-params "$trunk_params" --trunk-z-offset "$trunk_z_offset"
+            --trunk-min-observations "$trunk_min_observations")
+fi
+if [[ "$trunk_from_source" == 1 ]]; then command+=(--trunk-from-source); fi
+if [[ "$trunk_assume_local" == 1 ]]; then command+=(--trunk-assume-local-frame); fi
+if [[ -n "$dump_trunk_params" ]]; then command+=(--dump-trunk-params "$dump_trunk_params"); fi
 if [[ "$tree_collision" == 0 ]]; then command+=(--no-tree-collision); fi
 if [[ "$keep_contact_open" == 1 ]]; then command+=(--keep-contact-open); fi
 if [[ "$keep_open" == 1 && "$gui" != none ]]; then command+=(--keep-open); fi

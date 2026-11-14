@@ -23,6 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
   tf2_ros
   eigen_conversions
   message_generation
+  fast_lio
 )
 
 ## Find system libraries

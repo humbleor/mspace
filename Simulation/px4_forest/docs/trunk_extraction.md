@@ -2,6 +2,72 @@
 
 当前方法从森林 PCD 提取有观测支撑的树干与连接枝段，生成 Gazebo 物理碰撞几何。保持原 PCD 雷达、坐标转换、Iris 机体碰撞与接触参数，不改变导航算法。tree_id 代表几何树干假设，不保证每个 ID 都是一棵不同的实树。
 
+## 在线感知结果驱动
+
+推荐在**真实传感器数据**上跑一次 Fast-LIO2 + 在线树干提取，再把参数导入 Gazebo。Gazebo 的 PCD 渲染只作为雷达传感器，不作为提取数据源。
+
+### 真实 bag 在线提取
+
+```bash
+python3 Simulation/run.py replay ~/bagfiles/yxb_20260208-104116.bag \
+  --output artifacts/forest_lio/trunk_online_replay \
+  --duration 195 --rate 0.5 \
+  --trunk-dump artifacts/forest_lio/trunk_online_replay/online_trunks.csv
+```
+
+`--trunk-dump` 会启用 `tree_trunks` 并把 `tree_trunks/dump_path` 传给 LIO。CSV 每批覆盖写一次，列为 `id,x,y,z_base,height,radius,axis_x,axis_y,axis_z,coverage,observations`；真实 bag 的 `frame_id=world`，坐标在 bag 的 LIO 世界系。
+
+### 变换到场景局部系
+
+```bash
+python3 Simulation/px4_forest/scripts/geometry_from_trunks.py \
+  --scene artifacts/forest_lio/route_125_155.json \
+  --trunks artifacts/forest_lio/trunk_online_replay/online_trunks.csv \
+  --output artifacts/px4_forest/online_trunks_geometry \
+  --transform-from-source
+```
+
+- `--transform-from-source` 用场景的 `origin_world` / `rotation_world_from_local` 变换。CSV `frame_id=world` 时必须显式选择 `--transform-from-source` 或 `--assume-local-frame`，否则转换器直接报错，避免静默错位。
+- `--min-observations` 默认 2，丢弃只被单批观测到的 track，避免把悬空/噪声圆柱放进 Gazebo。
+- 转换器会重算 `local_map_sha256`，仍通过 `run_sitl.py` 的地图一致性检查。
+
+### 用参数文件启动 Gazebo
+
+```bash
+bash Simulation/start.sh full --speed .1 \
+  --forest-geometry artifacts/px4_forest/online_trunks_geometry/geometry.json
+```
+
+也可以不落 `geometry.json`，让入口在线转换：
+
+```bash
+bash Simulation/start.sh full --speed .1 \
+  --trunk-params artifacts/forest_lio/trunk_online_replay/online_trunks.csv \
+  --trunk-from-source --trunk-min-observations 2
+```
+
+### 在 Gazebo 运行中落盘（可选）
+
+`--dump-trunk-params` 也会把 Gazebo 运行中的在线结果写到 CSV；它使用的是渲染出的 PCD 点云，近距点可能比真实雷达稀疏，因此优先用上面的真实 bag 回放。Gazebo world-frame 的 CSV `frame_id=uav1/lio_init`，可直接用 `--trunk-params`（无需 `--trunk-from-source`）：
+
+```bash
+bash Simulation/start.sh full --speed .1 --headless \
+  --dump-trunk-params artifacts/px4_forest/online_trunks_pass1.csv
+bash Simulation/start.sh full --speed .1 \
+  --trunk-params artifacts/px4_forest/online_trunks_pass1.csv
+```
+
+两遍必须使用同一 `--scene`；在线结果只覆盖飞行路线 7 m 范围内观测到的树。若圆柱整体偏高/偏低，用 `--trunk-z-offset` 补偿。
+
+限制与约定：
+
+- 真实 bag 的 CSV 是源世界系，必须加 `--transform-from-source`；Gazebo 运行中落盘的 `uav1/lio_init` CSV 是局部系，可直接使用。`--trunk-z-offset` 可补偿 LIO 原点与场景局部地面的 z 差。
+- 默认 `--min-observations 2` 会丢弃单批 track；保留更多/更少时显式调整，`counts` 不等于树木数量。
+- 只建模已观测树干段，不补根部、地面延伸、枝干或未观测树；`observations` 和 `coverage` 是观测证据，不是未观测表面的确认。
+- 强部分观测下同一棵树可能产生重叠 track；对 Gazebo 碰撞而言重叠圆柱是保守的，但 `counts` 不等于树木数量。
+- 碰撞几何在起飞前按文件生成，运行中不随在线结果更新；在线结果只用于下一次预生成。
+- 未提供 `--trunk-params`/`--forest-geometry` 时仍执行下面的离线 PCD 拟合。
+
 ## 方法
 
 - 标准截面 0.5 m，并增加 0.9 m 稀疏补检截面。补检采用至少 8 个截面点、至少 3/12 个角度区间和至少 2 m 高度；标准尺度的可靠拟合保留原参数。
