@@ -5,8 +5,6 @@
 # swarm_frame_adapter 把两者都换算到同一个 world，规划器改用 world/odom 与 world/cloud。
 # 起飞前需静止约 3 秒（适配节点锁定固定变换），/uav1/frame_ready 为 true 后控制器才放行任务。
 #
-# 回退旧链路（两套独立 world，仅供对比/排障）：
-#   WORLD_FRAME=0 ./ego_fastlio2_one_livox.sh
 set -e
 
 export DISABLE_ROS1_EOL_WARNINGS=1
