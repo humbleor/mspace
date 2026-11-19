@@ -45,7 +45,7 @@ catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 | `Modules/ego_planner_swarm/`                    | 包含多个包                    | 规划、机间检测、通信与仿真 |
 | `Modules/ego_planner_swarm/plan_manage/`        | `ego_planner`                 | 规划管理与启动配置         |
 | `Modules/ego_planner_swarm/drone_detect_lidar/` | `drone_detect_lidar`          | 雷达机间检测               |
-| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/`  | `rosmsg_tcp_bridge`           | 多机消息桥接               |
+| `Modules/ego_planner_swarm/swarm_conn_brige/`  | `swarm_conn_brige`           | 多机消息桥接               |
 | `Modules/swarm_control/`                        | `prometheus_swarm_control`    | 控制与地面站               |
 | `Modules/realsense_ros/`                        | 包含 `realsense2_camera` 等包 | 相机驱动                   |
 | `Experiment/mavros/`                            | `mavros_bringup`              | PX4 MAVROS 启动配置        |
@@ -59,7 +59,7 @@ catkin_make --source Modules/ego_planner_swarm --build build/ego_planner_swarm
 - `traj_utils`：轨迹工具。
 - `drone_detect_lidar`：当前参与构建的雷达机间检测。
 - `drone_detect`：存在 `CATKIN_IGNORE`，不参与当前构建。
-- `rosmsg_tcp_bridge`：多机通信桥接。
+- `swarm_conn_brige`：多机通信桥接。
 - `uav_simulator`：地图生成、传感器模拟、无人机模型与可视化。
 
 ## 仿真运行

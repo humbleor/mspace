@@ -73,7 +73,7 @@ class FleetTests(unittest.TestCase):
                 wrapper=ET.parse(out/"modules.launch").getroot()
                 control = next(e for e in wrapper.findall("include") if "ego_swarm_control.launch" in e.get("file"))
                 self.assertEqual(control.find("arg[@name='use_bridge']").get("value"), "true")
-                include=next(e for e in wrapper.findall("include") if "rosmsg_tcp_bridge" in e.get("file"))
+                include=next(e for e in wrapper.findall("include") if "swarm_conn_brige" in e.get("file"))
                 values={e.get("name"):e.get("value") for e in include.findall("arg")}
                 self.assertEqual(int(values["uav_id"]),v.uav_id)
                 self.assertEqual(int(values["swarm_num"]),3)
@@ -360,14 +360,13 @@ class FleetTests(unittest.TestCase):
                 control = next(e for e in wrapper.findall("include") if "ego_swarm_control" in e.get("file"))
                 self.assertEqual(control.find("arg[@name='enable_mission_gate']").get("value"), "true")
                 self.assertEqual(planner.find("arg[@name='enable_mission_gate']").get("default"), "true")
-                self.assertTrue(
-                    any(
-                        e.get("name")
-                        == "/uav_%d_ego_planner_node/fsm/strict_waypoint_tracking"
-                        % v.uav_id
-                        for e in planner.findall("param")
-                    )
+                strict_tracking = planner.find(
+                    "param[@name='/uav_%d_ego_planner_node/fsm/strict_waypoint_tracking']"
+                    % v.uav_id
                 )
+                self.assertIsNotNone(strict_tracking)
+                self.assertEqual(strict_tracking.get("value"), "true")
+                self.assertTrue(info["overrides"]["strict_waypoint_tracking"])
 
     def test_model_generation_uses_per_vehicle_startup_and_one_world(self):
         px4 = ROOT / "artifacts/px4_forest/PX4-Autopilot"

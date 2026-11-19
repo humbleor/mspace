@@ -1,4 +1,4 @@
-# rosmsg_tcp_bridge（MSB2）
+# swarm_conn_brige（MSB2）
 
 当前桥传输 UDP 单机 Bspline 和 TCP 逐跳 MultiBsplines，保留原线格式、话题与实机启动方式。此处为已实现的第一轮改动；docs/swarm_conn_msb_design.md 中的新 MSB/全互联方案尚未实现。
 

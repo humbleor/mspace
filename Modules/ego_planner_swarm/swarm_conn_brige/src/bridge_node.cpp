@@ -750,7 +750,7 @@ public:
 
 int main(int argc, char **argv)
 {
-  ros::init(argc, argv, "rosmsg_tcp_bridge");
+  ros::init(argc, argv, "swarm_conn_brige");
   try
   {
     Bridge bridge;

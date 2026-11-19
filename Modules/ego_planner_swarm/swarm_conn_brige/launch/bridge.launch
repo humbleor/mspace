@@ -9,7 +9,7 @@
   <arg name="udp_port" default="8081"/>
   <arg name="udp_peer_port" default="8081"/>
   <arg name="udp_peer_ports" default="[]"/>
-  <node pkg="rosmsg_tcp_bridge" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen">
+  <node pkg="swarm_conn_brige" name="uav_$(arg uav_id)_bridge_node" type="bridge_node" output="screen">
     <param name="drone_id" value="$(arg uav_id)"/>
     <param name="swarm_num" value="$(arg swarm_num)"/>
     <param name="next_drone_ip" value="$(arg next_drone_ip)"/>

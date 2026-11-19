@@ -114,7 +114,7 @@
         <param name="tf45" value="true"/>
   </node>
 
-  <!-- <include file="$(find rosmsg_tcp_bridge)/launch/bridge.launch">
+  <!-- <include file="$(find swarm_conn_brige)/launch/bridge.launch">
     <arg name="uav_id" value="$(arg uav_id)"/>
     <arg name="odom_twist_in_body" value="$(arg enable_world_frame)"/>
     <arg name="next_drone_ip" value="$(arg next_drone_ip)"/>

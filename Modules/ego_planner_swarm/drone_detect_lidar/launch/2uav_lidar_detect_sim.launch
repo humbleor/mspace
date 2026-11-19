@@ -169,10 +169,10 @@
   </group>
 
   <!-- ========================================================================
-       4. 通信桥接 (复用现有 rosmsg_tcp_bridge)
+       4. 通信桥接 (复用现有 swarm_conn_brige)
        ======================================================================== -->
   <!-- UAV 1 的通信桥接 -->
-  <node pkg="rosmsg_tcp_bridge" type="bridge_node" name="uav$(arg uav_id_1)_bridge" output="screen">
+  <node pkg="swarm_conn_brige" type="bridge_node" name="uav$(arg uav_id_1)_bridge" output="screen">
     <param name="next_drone_ip" value="127.0.0.1"/>
     <param name="broadcast_ip" value="255.255.255.255"/>
     <param name="drone_id" value="$(arg uav_id_1)"/>

@@ -12,7 +12,7 @@
 
 链路：模拟 Mid-360/IMU → 原 Fast-LIO2 → 原 swarm_estimator → MAVROS 外部位姿 → PX4 EKF；PX4 里程计和 LIO 点云进入原 EGO，轨迹经原 traj_server、ego_traj_to_cmd 和 swarm_controller 发送给 MAVROS/PX4，Gazebo 更新真实模拟运动。复用 Modules 的实机 launch 模板及参数，接入细节见 [原模块接入约定](docs/module_alignment.md)。
 
-当前任务显式启用原 EGO 节点新增的 `fsm/strict_waypoint_tracking=true`，使用实际里程计确认逐点到达，再规划下一点；参数默认 false，保留原连续任务模式。该修复改变原模块的任务调度，运行文件明确记录，未修改 B 样条避障优化器、控制器、轨迹前视或验收半径。更新后须重建规划模块。
+scene 参考路线显式启用原 EGO 节点已有的 `fsm/strict_waypoint_tracking=true`，使用实际里程计确认逐点到达，再规划下一点；网格任务沿用 `false` 的连续调度。运行文件记录实际参数值。该设置使用原模块的可选任务调度，未修改 B 样条避障优化器、控制器、轨迹前视或验收半径；首次使用前须确保规划模块已包含该选项并完成构建。
 
 这是 **PX4 SITL 软件飞控在环**。实体飞控硬件在环需要另接飞控并适配 HIL 通信，当前没有完成该部分。
 

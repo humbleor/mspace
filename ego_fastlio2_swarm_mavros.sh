@@ -14,6 +14,7 @@ GCS_IP="192.168.1.100"  # gcs
 UAV1_HOSTNAME="joey"
 UAV2_HOSTNAME="mspace"
 PASSWORD="123"
+
 ROS_MASTER_URI="http://${UAV1_IP}:11311"
 # MAVLink DISTANCE_SENSOR instance IDs; verify on each FCU, not uORB device_id.
 TFMINI_ID_UAV1="${TFMINI_ID_UAV1:-0}"
@@ -178,13 +179,3 @@ main() {
 }
 
 main
-
-# gnome-terminal \
-# --window -e 'bash -c "roslaunch mavros_bringup px4_mavros_swarm.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 5; roslaunch livox_ros_driver2 msg_MID360.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 15; roslaunch fast_lio mapping_mid360.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 10; roslaunch prometheus_swarm_control ego_swarm_control.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 10; roslaunch ego_planner osfastlio2_simdemo.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 15; roslaunch prometheus_swarm_control ego_station.launch; exec bash"' \
-# --tab -e 'bash -c "sleep 5; roslaunch realsense2_camera rs_camera.launch; exec bash"'
-

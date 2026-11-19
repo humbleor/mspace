@@ -12,10 +12,9 @@ source /opt/ros/noetic/setup.bash
 source ~/workspace/ws_livox/devel/setup.bash
 source ~/workspace/mspace/devel/setup.bash
 
-# :- 是语法，默认值 +1
-WORLD_FRAME="${WORLD_FRAME:-1}"
-TFMINI_ID="${TFMINI_ID:-0}"
+# :- 是语法，不是负号
 LIDAR_ID="${LIDAR_ID:-192_168_2_181}"
+TFMINI_ID="${TFMINI_ID:-0}"
 
 # 任务网格范围和间距（米），使用当前规划坐标系。
 BOX_MIN_X="${BOX_MIN_X:-0.0}"
@@ -29,19 +28,11 @@ STEP_Y="${STEP_Y:-5.0}"
 STEP_Z="${STEP_Z:-2.0}"
 GRID_ARGS="box_min_x:=$BOX_MIN_X box_min_y:=$BOX_MIN_Y box_min_z:=$BOX_MIN_Z box_max_x:=$BOX_MAX_X box_max_y:=$BOX_MAX_Y box_max_z:=$BOX_MAX_Z step_X:=$STEP_X step_Y:=$STEP_Y step_Z:=$STEP_Z"
 
-if [ "$WORLD_FRAME" = "1" ]; then
-    MAVROS_ARGS="enable_world_frame:=true tfmini_id:=$TFMINI_ID"
-    DRIVER_CMD="roslaunch fast_lio swarm_mid360_driver.launch uav_id:=1"
-    LIO_CMD="roslaunch fast_lio mapping_mid360.launch uav_id:=1 enable_world_frame:=true lidar_topic:=/uav1/livox/lidar_$LIDAR_ID imu_topic:=/uav1/livox/imu_$LIDAR_ID"
-    CONTROL_ARGS="swarm_num:=1 uav_id:=1 enable_world_frame:=true uav_init_x:=0.0 uav_init_y:=0.0 uav_init_z:=0.0 uav_init_yaw:=0.0"
-    PLANNER_ARGS="uav_id:=1 enable_world_frame:=true"
-else
-    MAVROS_ARGS="tfmini_id:=$TFMINI_ID"
-    DRIVER_CMD="roslaunch livox_ros_driver2 msg_MID360.launch"
-    LIO_CMD="roslaunch fast_lio mapping_mid360.launch"
-    CONTROL_ARGS=""
-    PLANNER_ARGS=""
-fi
+MAVROS_ARGS="enable_world_frame:=true tfmini_id:=$TFMINI_ID"
+DRIVER_CMD="roslaunch fast_lio swarm_mid360_driver.launch uav_id:=1"
+LIO_CMD="roslaunch fast_lio mapping_mid360.launch uav_id:=1 enable_world_frame:=true lidar_topic:=/uav1/livox/lidar_$LIDAR_ID imu_topic:=/uav1/livox/imu_$LIDAR_ID"
+CONTROL_ARGS="swarm_num:=1 uav_id:=1 enable_world_frame:=true uav_init_x:=0.0 uav_init_y:=0.0 uav_init_z:=0.0 uav_init_yaw:=0.0"
+PLANNER_ARGS="uav_id:=1 enable_world_frame:=true"
 
 # 起飞前检查：world 模式下 /uav1/frame_ready 必须为 true（地面站/任务指令才会被执行）。
 gnome-terminal \

@@ -401,7 +401,7 @@ tree.z_base = z_min       # 最低点 Z
 
 ### 真机（多主机）
 
-使用 `rosmsg_tcp_bridge` 通过 UDP 广播/TCP 单播跨主机通信（`broadcast_ip`、`broadcast_port`、`next_drone_ip` 参数配置）。
+使用 `swarm_conn_brige` 通过 UDP 广播/TCP 单播跨主机通信（`broadcast_ip`、`broadcast_port`、`next_drone_ip` 参数配置）。
 
 ---
 

@@ -133,7 +133,7 @@
   </include>
 
   <!-- Same MSB bridge as hardware; localhost peers need separate ports. -->
-  <include if="$(arg use_bridge)" file="$(find rosmsg_tcp_bridge)/launch/ground_test.launch"/>
+  <include if="$(arg use_bridge)" file="$(find swarm_conn_brige)/launch/ground_test.launch"/>
 
   <node if="$(arg rviz)" name="rvizvisualisation" pkg="rviz" type="rviz" output="screen"
   args="-d $(find ego_planner)/launch_new/traj.rviz" />

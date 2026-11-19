@@ -132,7 +132,7 @@ bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.js
   --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)" --duration 600 --speed .25
 ```
 
-多机森林入口现在可追加 `--use-bridge`，使用实际 `rosmsg_tcp_bridge` 的 TCP 前驱链与 UDP 单机轨迹；不加开关继续 ROS 直连。每次运行自动分配各机端口，同机 UDP 按对端端口列表分发，端口写入 `manifest.json`。例如：
+多机森林入口现在可追加 `--use-bridge`，使用实际 `swarm_conn_brige` 的 TCP 前驱链与 UDP 单机轨迹；不加开关继续 ROS 直连。每次运行自动分配各机端口，同机 UDP 按对端端口列表分发，端口写入 `manifest.json`。例如：
 
 ```bash
 bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \

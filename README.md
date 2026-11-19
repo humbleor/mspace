@@ -23,7 +23,7 @@
 | `Modules/ego_planner_swarm/`                    | 规划、环境表示、检测、通信与仿真，包含多个包 |
 | `Modules/ego_planner_swarm/plan_manage/`        | 规划管理及启动配置，`ego_planner`            |
 | `Modules/ego_planner_swarm/drone_detect_lidar/` | 雷达机间检测，`drone_detect_lidar`           |
-| `Modules/ego_planner_swarm/rosmsg_tcp_bridge/`  | 多机消息桥接，`rosmsg_tcp_bridge`            |
+| `Modules/ego_planner_swarm/swarm_conn_brige/`  | 多机消息桥接，`swarm_conn_brige`            |
 | `Modules/swarm_control/`                        | 控制与地面站，`prometheus_swarm_control`     |
 | `Modules/realsense_ros/`                        | RealSense 驱动，包含`realsense2_camera`      |
 | `Experiment/mavros/`                            | MAVROS 启动配置，`mavros_bringup`            |
@@ -97,7 +97,7 @@ Livox 单机脚本默认启用公共坐标 world 模式：MAVROS 本地 frame �
 
 ### 双机协同
 
-当前实机多机脚本配置为两台无人机，采用多主机 ROS 网络，并启动机间雷达检测与 `rosmsg_tcp_bridge`。四机、十机仿真入口不代表已有相同规模的实机部署脚本。
+当前实机多机脚本配置为两台无人机，采用多主机 ROS 网络，并启动机间雷达检测与 `swarm_conn_brige`。四机、十机仿真入口不代表已有相同规模的实机部署脚本。
 
 启动前同步检查各脚本中的：
 

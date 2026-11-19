@@ -201,7 +201,7 @@ def prepare_modules(
         arg = planner.getroot().find("arg[@name='use_bridge']")
         arg.set("value", "true")
         arg.attrib.pop("default", None)
-        connection = ET.SubElement(wrapper, "include", file=str(root / "Modules/ego_planner_swarm/rosmsg_tcp_bridge/launch/bridge.launch"))
+        connection = ET.SubElement(wrapper, "include", file=str(root / "Modules/ego_planner_swarm/swarm_conn_brige/launch/bridge.launch"))
         arguments = {
             "uav_id": uav_id, "swarm_num": swarm_num, "next_drone_ip": "127.0.0.1",
             "broadcast_ip": "127.0.0.1", "bind_ip": "127.0.0.1",
@@ -263,7 +263,7 @@ def prepare_modules(
         planner.getroot(),
         "param",
         name=f"/uav_{uav_id}_ego_planner_node/fsm/strict_waypoint_tracking",
-        value="false",
+        value=str(not grid).lower(),
         type="bool",
     )
     if not grid:
@@ -318,7 +318,7 @@ def prepare_modules(
             else {}
         ),
         "overrides": dict(
-            overrides, realworld_experiment=True, mission_gate=True, strict_waypoint_tracking=False
+            overrides, realworld_experiment=True, mission_gate=True, strict_waypoint_tracking=not grid
         ),
         "algorithms_modified": True,
         "simulation_map_layout": layout,

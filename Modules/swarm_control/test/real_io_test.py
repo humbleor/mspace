@@ -116,9 +116,9 @@ class ConfigTest(unittest.TestCase):
 
     def test_two_uav_sim_bridge_toggle_routes_through_two_bridges(self):
         direct = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=false")
-        self.assertFalse(any(n.package == "rosmsg_tcp_bridge" for n in direct.nodes))
+        self.assertFalse(any(n.package == "swarm_conn_brige" for n in direct.nodes))
         cfg = load("ego_planner", "launch_new/2uav_mid360_sim.launch", "use_bridge:=true")
-        bridges = [n for n in cfg.nodes if n.package == "rosmsg_tcp_bridge"]
+        bridges = [n for n in cfg.nodes if n.package == "swarm_conn_brige"]
         self.assertEqual(len(bridges), 2)
         planners = [n for n in cfg.nodes if n.type == "ego_planner_node"]
         self.assertEqual(len(planners), 2)
@@ -300,7 +300,7 @@ class RuntimeTest(unittest.TestCase):
                 stop(proc)
 
     def bridge(self, uid, tcp_listen, tcp_peer, udp_listen, udp_peer, name):
-        return self.launch("rosmsg_tcp_bridge","bridge_node",name,
+        return self.launch("swarm_conn_brige","bridge_node",name,
                            {"drone_id":uid,"swarm_num":2,"next_drone_ip":"127.0.0.1",
                             "broadcast_ip":"127.0.0.1","bind_ip":"127.0.0.1",
                             "tcp_port":tcp_listen,"tcp_peer_port":tcp_peer,
@@ -310,7 +310,7 @@ class RuntimeTest(unittest.TestCase):
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as first, socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as second:
             first.bind(("127.0.0.1",0));second.bind(("127.0.0.1",0))
             for peer in (first,second):peer.settimeout(3)
-            self.launch("rosmsg_tcp_bridge","bridge_node","fanout_bridge",
+            self.launch("swarm_conn_brige","bridge_node","fanout_bridge",
                         {"drone_id":1,"swarm_num":3,"next_drone_ip":"127.0.0.1",
                          "broadcast_ip":"127.0.0.1","bind_ip":"127.0.0.1",
                          "tcp_port":port(),"tcp_peer_port":port(),
@@ -416,7 +416,7 @@ class RuntimeTest(unittest.TestCase):
         wait_for(lambda: usable and not usable[-1].data, reason="expired trajectory leaves usable set")
 
     def test_slow_tcp_peer_does_not_block_ros_callback(self):
-        proc = self.launch("rosmsg_tcp_bridge", "bridge_sender_test", "bridge_slow_peer",
+        proc = self.launch("swarm_conn_brige", "bridge_sender_test", "bridge_slow_peer",
                            {"test_peer_port":port(), "tcp_port":port(),
                             "udp_port":port(socket.SOCK_DGRAM), "udp_peer_port":port(socket.SOCK_DGRAM)})
         self.assertEqual(proc.wait(timeout=12), 0, "slow TCP callback regression failed; see bridge_slow_peer.log")
