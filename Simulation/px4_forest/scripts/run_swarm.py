@@ -134,6 +134,10 @@ def parser():
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--stage", choices=["hover", "forest"], default="forest")
     ap.add_argument("--use-bridge", action="store_true", help="Use MSB2 TCP/UDP trajectory bridges instead of direct ROS (forest stage)")
+    ap.add_argument("--tree-drift-shadow", action="store_true",
+                    help="Score tree registration on incoming trajectories in two-UAV forest SITL")
+    ap.add_argument("--tree-shadow-drift", nargs=3, type=float, metavar=("DX", "DY", "YAW_DEG"),
+                    help="Inject planar drift into UAV2 shadow-only trees and trajectory copies")
     ap.add_argument(
         "--scene", type=Path, default=ROOT / "artifacts/forest_lio/route_125_155.json"
     )
@@ -180,8 +184,18 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.use_bridge and a.stage != "forest":
         ap.error("--use-bridge requires --stage forest; hover does not start EGO")
+    if a.tree_shadow_drift is not None and not a.tree_drift_shadow:
+        ap.error("--tree-shadow-drift requires --tree-drift-shadow")
+    shadow_drift = {}
     try:
         specs = load_fleet(a.fleet)
+        if a.tree_drift_shadow and (a.stage != "forest" or {v.uav_id for v in specs} != {1, 2}):
+            raise ValueError("--tree-drift-shadow requires forest stage and UAVs 1 and 2")
+        if a.tree_shadow_drift is not None:
+            dx, dy, yaw = a.tree_shadow_drift
+            if not np.isfinite(a.tree_shadow_drift).all():
+                raise ValueError("Shadow drift values must be finite")
+            shadow_drift[2] = (dx, dy, float(np.deg2rad(yaw)))
         if (
             not all(
                 np.isfinite(x)
@@ -273,6 +287,7 @@ def main(argv=None):
                     "udp_port": ports["vehicles"][v.name]["bridge_udp"],
                     "udp_peer_ports": [ports["vehicles"][peer.name]["bridge_udp"] for peer in specs if peer != v],
                 } if a.use_bridge else None,
+                tree_drift_shadow=a.tree_drift_shadow,
             )
             write_json(d / "module_alignment.json", c.module_alignment)
             gazebo = prepare_model(
@@ -345,6 +360,7 @@ def main(argv=None):
     snapshots = {}
     began = time.monotonic()
     rospy = None
+    shadow = None
     windows = []
 
     def launch(args, name, cwd=out, critical=True, child_env=None):
@@ -452,6 +468,10 @@ def main(argv=None):
         rospy.set_param("/use_sim_time", True)
         rospy.init_node("forest_swarm", disable_signals=True)
         handles_ros = []
+        if a.tree_drift_shadow:
+            from tree_drift_shadow import TreeDriftShadow
+
+            shadow = TreeDriftShadow(rospy, tuple(v.uav_id for v in specs), a.use_bridge, shadow_drift)
 
         def subscribe(c, topic, kind, callback):
             def receive(m):
@@ -1209,6 +1229,22 @@ def main(argv=None):
             errors.append("Inter-aircraft clearance evidence failed")
         write_json(out / "pair_separation.json", pair)
         write_json(out / "graph.json", graph)
+        shadow_report = None
+        if a.tree_drift_shadow:
+            from tree_drift_shadow import score_predictions, write_samples
+
+            if shadow is None or origin is None:
+                shadow_report, samples = {"status": "simulation_inputs_unavailable"}, []
+            else:
+                shadow_report, samples = score_predictions(
+                    shadow.predictions, {c.spec.uav_id: traces[c.spec.name] for c in aircraft},
+                    shadow_drift, a.minimum_separation, a.max_truth_gap,
+                )
+                shadow_report["fast_lio_trunk_inputs"] = shadow.trunk_inputs
+                shadow_report["tree_snapshots"] = shadow.tree_counts
+                shadow_report["accepted_registration_updates"] = shadow.match_counts
+            write_json(out / "tree_drift_shadow.json", shadow_report)
+            write_samples(out / "tree_drift_shadow.csv", samples)
         result = {
             "status": "ok" if success and not errors else "failed",
             "errors": errors,
@@ -1222,12 +1258,18 @@ def main(argv=None):
             "wall_s": time.monotonic() - began,
             "flight_end_sim_s": flight_end,
             "limits": [
-                "Known configured initial placements; no online inter-UAV registration.",
+                ("Known configured initial placements; tree registration only scores trajectory copies."
+                 if a.tree_drift_shadow else "Known configured initial placements; no online inter-UAV registration."),
                 "Lidar returns contain static forest only; other UAVs are exchanged as planner trajectories.",
                 "Piecewise-linear physical clearance between recorded samples.",
                 "No physical flight controller or real-flight validation.",
             ],
         }
+        if shadow_report is not None:
+            result["tree_drift_shadow"] = {
+                "status": shadow_report["status"], "report": "tree_drift_shadow.json",
+                "samples": "tree_drift_shadow.csv",
+            }
         write_json(out / "result.json", result)
         lines = [
             "# PX4 forest fleet validation",

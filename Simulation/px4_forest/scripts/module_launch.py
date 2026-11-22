@@ -110,6 +110,7 @@ def prepare_modules(
     bridge=None,
     simulation_speed=None,
     trunk_dump=None,
+    tree_drift_shadow=False,
 ):
     """Bind Modules templates; world_frame enables the per-UAV swarm_frame_adapter path."""
     root, out = Path(root), Path(out)
@@ -137,14 +138,33 @@ def prepare_modules(
     )
     ET.SubElement(lio, "arg", name="uav_id", value=str(uav_id))
     ET.SubElement(lio, "arg", name="rviz", value="false")
-    if trunk_dump is not None:
+    if trunk_dump is not None or tree_drift_shadow:
         ET.SubElement(lio, "arg", name="tree_trunks", value="true")
+    if trunk_dump is not None:
         ET.SubElement(lio, "arg", name="tree_trunk_dump", value=str(trunk_dump))
     if world_frame:
         # World mode derives sensor topics from the namespace, so bind them directly.
         ET.SubElement(lio, "arg", name="enable_world_frame", value="true")
         ET.SubElement(lio, "arg", name="lidar_topic", value=sensor_topic["lidar"])
         ET.SubElement(lio, "arg", name="imu_topic", value=sensor_topic["imu"])
+    if tree_drift_shadow:
+        from tree_drift_shadow import MAX_SOURCE_AGE, MIN_TRUNK_OBSERVATIONS, NS
+
+        if not world_frame or swarm_num != 2 or uav_id not in (1, 2):
+            raise ValueError("Tree drift shadow requires world-frame UAVs 1 and 2")
+        peer = 3 - uav_id
+        shadow = ET.SubElement(
+            wrapper, "include",
+            file=str(root / "Modules/ego_planner_swarm/drone_detect_lidar/launch/drone_detect_lidar.launch"),
+        )
+        for name, value in {
+            "drone_id": uav_id, "use_external_trunks": "true", "enable_relay": "false",
+            "external_min_observations": MIN_TRUNK_OBSERVATIONS,
+            "odom_topic": "world/odom", "neighbor_odom_topic": f"/uav{peer}/world/odom",
+            "output_ns": f"{NS}/uav{uav_id}", "self_tree_topic": f"{NS}/uav{uav_id}/world_trees",
+            "neighbor_tree_topic": f"{NS}/uav{peer}/world_trees", "max_source_age": MAX_SOURCE_AGE,
+        }.items():
+            ET.SubElement(shadow, "arg", name=name, value=str(value))
     control = ET.SubElement(
         wrapper,
         "include",

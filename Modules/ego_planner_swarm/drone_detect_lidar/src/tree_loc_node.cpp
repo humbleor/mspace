@@ -93,6 +93,7 @@ private:
   double max_yaw_deg_;
   double max_match_residual_;
   double max_centroid_dist_;
+  double max_source_age_;
 
   // Triangle matching parameters (HashReg style)
   TriangleMatchConfig tri_config_;
@@ -116,6 +117,7 @@ private:
     nh_.param("max_yaw_deg", max_yaw_deg_, 20.0);
     nh_.param("max_match_residual", max_match_residual_, 0.5);
     nh_.param("max_centroid_dist", max_centroid_dist_, 3.0);
+    nh_.param("max_source_age", max_source_age_, 0.0);
 
     nh_.param("triangle_min_side", tri_config_.triangle_min_side, tri_config_.triangle_min_side);
     nh_.param("triangle_max_side", tri_config_.triangle_max_side, tri_config_.triangle_max_side);
@@ -382,6 +384,19 @@ private:
       neighbor_trees_snap = neighbor_trees_;
       self_odom_snap = self_odom_;
       neighbor_odom_snap = neighbor_odom_;
+    }
+
+    // Stamp the opt-in estimate with the oldest source instead of the timer tick.
+    ros::Time match_stamp;
+    if (max_source_age_ > 0.0) {
+      const auto now = ros::Time::now();
+      match_stamp = std::min(self_trees_snap->header.stamp, neighbor_trees_snap->header.stamp);
+      const auto fresh = [&](const ros::Time& stamp) {
+        return !stamp.isZero() && stamp <= now && (now - stamp).toSec() <= max_source_age_;
+      };
+      if (!fresh(self_trees_snap->header.stamp) || !fresh(neighbor_trees_snap->header.stamp) ||
+          !fresh(self_odom_snap->header.stamp) || !fresh(neighbor_odom_snap->header.stamp))
+        return;
     }
 
     // ===== Step 0: Distance filter =====
@@ -675,7 +690,7 @@ private:
     tree_pose_error_pub_.publish(error_msg);
 
     drone_detect_lidar::TreeRelativePose rel_msg;
-    rel_msg.header.stamp = ros::Time::now();
+    rel_msg.header.stamp = max_source_age_ > 0.0 ? match_stamp : ros::Time::now();
     rel_msg.header.frame_id = self_odom_snap->header.frame_id;
     rel_msg.src_drone_id = drone_id_;
     rel_msg.dst_drone_id = neighbor_trees_snap->drone_id;

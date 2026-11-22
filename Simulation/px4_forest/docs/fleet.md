@@ -147,6 +147,22 @@ bash Simulation/start.sh swarm \
 - 可先加 `--prepare-only` 检查双机/三机生成配置；该模式不会启动飞行进程或证明收发成功。`--stage hover --use-bridge` 不支持，因为 hover 不启动规划链。
 - 仍共享 ROS Master；桥只迁移轨迹，不迁移 DroneState/readiness、命令、TF 或树检测。原 EGO 0.25 s UDP 起始时间门限及失联动作未改，弱网、延迟和完整任务验收以本次结果为准。
 
+
+### 双机树干漂移旁路评估
+
+在双机森林阶段追加 `--tree-drift-shadow`。Fast-LIO2 提取的树干先按各机启动时的 TF 换算到规划坐标，再送入独立的树干匹配话题。旁路在邻机轨迹到达时取最近的有效变换，在相同仿真时刻比较原始和修正样条。自身位置采用同一时刻的 Gazebo 真值作为评分参考。
+
+```bash
+bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
+  --scene "$SCENE" --output "$OUTPUT" --gui none --use-bridge \
+  --tree-drift-shadow
+```
+
+将 `SCENE` 指向已有的森林场景 JSON，将 `OUTPUT` 指向空的输出目录。零注入运行后，可用另一个空目录追加 `--tree-shadow-drift 0.2 0.1 3`，给 UAV2 的旁路树干与样条副本同时施加 XY 平移（米）和偏航（度）。
+
+`tree_drift_shadow.json` 记录每个方向的配准覆盖率、成对误差 RMSE/P95/最大值、最小间距和危险接近漏报。阈值沿用本轮 `--minimum-separation`。`tree_drift_shadow.csv` 保存各评分时刻的原始和修正结果。只有同时有真值和有效配准的样本才参与成对比较，`partially_scored` 表示只有一个观察方向有成对样本。旁路结果用于离线评估，实际 EGO 继续读取原有轨迹话题。
+
+
 ## 仿真速度与资源
 
 PX4 v1.13 的 Gazebo MAVLink 插件在每次模型 Load 时缩放全局物理频率。多机若均读取 .5 倍速，第二次初始化可能因频率不是 250 Hz 整数倍而终止。

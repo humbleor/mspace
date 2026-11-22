@@ -7,6 +7,10 @@
   <arg name="drone_id" default="1"/>
   <arg name="uav_num" default="3"/>
   <arg name="odom_topic" default="lidar_slam/odom"/>
+  <arg name="output_ns" default="/uav$(arg drone_id)"/>
+  <arg name="self_tree_topic" default="$(arg output_ns)/tree_detection"/>
+  <arg name="neighbor_tree_topic" default="/uav$(arg drone_id)/neighbor_tree_detection"/>
+  <arg name="neighbor_odom_topic" default="/uav$(arg drone_id)/neighbor_odom"/>
 
   <!-- 实机: 树干由 fast_lio 在线提取，本节点只做消息转换; 仿真保持 false -->
   <arg name="use_external_trunks" default="false"/>
@@ -14,6 +18,7 @@
 
   <!-- 计算参数 -->
   <arg name="compute_frequency" default="5.0"/>
+  <arg name="max_source_age" default="0.0"/>
 
   <!-- 因子图优化 -->
   <arg name="enable_graph_opt" default="false"/>
@@ -50,8 +55,8 @@
     <remap from="~lidar_cloud" to="/uav$(arg drone_id)/pcl_render_node/cloud"/>
     <remap from="~external_trunks" to="/uav$(arg drone_id)/tree_trunks_data"/>
     <remap from="~odom" to="/uav$(arg drone_id)/$(arg odom_topic)"/>
-    <remap from="~tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
-    <remap from="~tree_cloud" to="/uav$(arg drone_id)/tree_cloud"/>
+    <remap from="~tree_detection" to="$(arg output_ns)/tree_detection"/>
+    <remap from="~tree_cloud" to="$(arg output_ns)/tree_cloud"/>
   </node>
 
   <!-- ========================================================================
@@ -65,16 +70,17 @@
 
     <param name="drone_id" value="$(arg drone_id)"/>
     <param name="compute_frequency" value="$(arg compute_frequency)"/>
+    <param name="max_source_age" value="$(arg max_source_age)"/>
 
-    <remap from="~self_tree_detection" to="/uav$(arg drone_id)/tree_detection"/>
-    <remap from="~neighbor_tree_detection" to="/uav$(arg drone_id)/neighbor_tree_detection"/>
+    <remap from="~self_tree_detection" to="$(arg self_tree_topic)"/>
+    <remap from="~neighbor_tree_detection" to="$(arg neighbor_tree_topic)"/>
     <remap from="~self_odom" to="/uav$(arg drone_id)/$(arg odom_topic)"/>
-    <remap from="~neighbor_odom" to="/uav$(arg drone_id)/neighbor_odom"/>
-    <remap from="~tree_pose_error" to="/uav$(arg drone_id)/tree_pose_error"/>
-    <remap from="~tree_relative_pose" to="/uav$(arg drone_id)/tree_relative_pose"/>
-    <remap from="~tree_relative_pose_msg" to="/uav$(arg drone_id)/tree_relative_pose_msg"/>
-    <remap from="~matched_tree_pairs" to="/uav$(arg drone_id)/matched_tree_pairs"/>
-    <remap from="~tri_descriptors" to="/uav$(arg drone_id)/tri_descriptors"/>
+    <remap from="~neighbor_odom" to="$(arg neighbor_odom_topic)"/>
+    <remap from="~tree_pose_error" to="$(arg output_ns)/tree_pose_error"/>
+    <remap from="~tree_relative_pose" to="$(arg output_ns)/tree_relative_pose"/>
+    <remap from="~tree_relative_pose_msg" to="$(arg output_ns)/tree_relative_pose_msg"/>
+    <remap from="~matched_tree_pairs" to="$(arg output_ns)/matched_tree_pairs"/>
+    <remap from="~tri_descriptors" to="$(arg output_ns)/tri_descriptors"/>
   </node>
 
   <!-- ========================================================================
