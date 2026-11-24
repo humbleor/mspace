@@ -1,6 +1,6 @@
 <launch>
   <arg name="uav_id" default="1"/>
-  <arg name="enable_world_frame" default="false"/>
+  <arg name="enable_world_frame" default="true"/>
   <arg name="rviz" default="false"/>
   <arg name="tree_trunks" default="false"/>
   <arg name="tree_trunk_window_sec" default="2.0"/>
