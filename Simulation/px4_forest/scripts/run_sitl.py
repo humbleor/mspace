@@ -222,6 +222,21 @@ def main():
     px4 = a.px4.resolve()
     if out.exists() and any(out.iterdir()):
         ap.error("output must be empty")
+    ports = {"ros": 41887}
+    with socket.socket() as master_socket:
+        master_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            master_socket.bind(("127.0.0.1", ports["ros"]))
+        except OSError as exc:
+            ap.error(f"Cannot bind ROS Master to 127.0.0.1:{ports['ros']}: {exc}")
+        # Keep the fixed TCP port out of this run's dynamic port allocations.
+        ports.update(
+            gazebo=port(),
+            sim=port(),
+            px4=port(socket.SOCK_DGRAM),
+            mavros=port(socket.SOCK_DGRAM),
+            unused=port(socket.SOCK_DGRAM),
+        )
     binary = px4 / "build/px4_sitl_default/bin/px4"
     plugin = ROOT / "artifacts/px4_forest/plant_build/libmspace_forest_plant.so"
     if not binary.exists() or not plugin.exists():
@@ -344,17 +359,6 @@ def main():
             trunk_dump=trunk_dump,
         )
         write_json(out / "module_alignment.json", module_info)
-    ports = {
-        key: port(kind)
-        for key, kind in [
-            ("ros", socket.SOCK_STREAM),
-            ("gazebo", socket.SOCK_STREAM),
-            ("sim", socket.SOCK_STREAM),
-            ("px4", socket.SOCK_DGRAM),
-            ("mavros", socket.SOCK_DGRAM),
-            ("unused", socket.SOCK_DGRAM),
-        ]
-    }
     gazebo = prepare_model(
         px4, out, plugin, ports, a.instance, gps=a.stage == "hover", speed=a.speed
     )
@@ -514,12 +518,17 @@ def main():
         deadline = time.monotonic() + 30
         while True:
             try:
-                if proxy.getPid("/forest_sitl")[0] == 1:
+                code, _, pid = proxy.getPid("/forest_sitl")
+                if code == 1:
+                    # A different master may have bound the port after our probe.
+                    identity = process_identity(pid)
+                    if pid != master.pid and (identity or {}).get("ppid") != master.pid:
+                        raise RuntimeError(f"ROS Master port {ports['ros']} is already in use")
                     break
             except OSError:
                 pass
             if master.poll() is not None or time.monotonic() > deadline:
-                raise RuntimeError("ROS master startup failed")
+                raise RuntimeError(f"ROS Master startup failed on port {ports['ros']}; see roscore.log")
             time.sleep(0.1)
         import rospy
         from nav_msgs.msg import Odometry

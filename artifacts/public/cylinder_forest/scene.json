@@ -1,0 +1,5 @@
+{
+  "map": "artifacts/public/cylinder_forest/forest.pcd",
+  "origin_world": [0, 0, 1.5],
+  "rotation_world_from_local": [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+}

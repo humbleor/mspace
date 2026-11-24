@@ -40,7 +40,7 @@ python3 Simulation/run.py px4 test
 
 ## 运行
 
-输出目录必须为空。进程、ROS Master、Gazebo Master 与 MAVLink 端口独立；结束只清理本次启动的进程。PX4 instance 默认 20；同时运行多个测试需显式使用不同 instance。
+输出目录必须为空，结束时只清理本次启动的进程。单机 ROS Master 固定为 `127.0.0.1:41887`，同一台机器不能同时启动两个单机实例；端口被占用时启动报错。Gazebo 和 MAVLink 端口仍自动分配，PX4 instance 默认 20。
 
 先验证原生 PX4 悬停（该阶段保留 GPS，只验证飞控/动力学链路）：
 

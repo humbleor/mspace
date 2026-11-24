@@ -18,8 +18,9 @@
 │   │   ├── run.py                  # Python 工具入口
 │   │   ├── forest_lio/             # 数据准备、传感器与轻量闭环
 │   │   └── px4_forest/             # PX4/Gazebo 物理闭环
-│   └── artifacts/                  # 本地生成，不随仓库提供
-│       ├── forest_lio/             # 地图、覆盖文件、场景及离线结果
+│   └── artifacts/
+│       ├── public/cylinder_forest/ # 随仓库提供的合成圆柱林输入
+│       ├── forest_lio/             # 本地地图、覆盖、场景及离线结果
 │       └── px4_forest/
 │           ├── PX4-Autopilot/      # 隔离的 PX4 源码与构建
 │           ├── plant_build/       # 本项目 Gazebo 物理接口插件
@@ -28,7 +29,7 @@
 └── ws_livox/                       # 已构建的 Livox 驱动工作区
 ```
 
-两个 `artifacts` 子目录均已由 Git 忽略，克隆仓库后不会包含其中的文件。下文中的路径是本地输入或输出位置，不是可在仓库中查看的文档链接。原始 Mid-360 bag 也需自行准备，默认放在 `~/bagfiles/`。
+`artifacts/` 默认由 Git 忽略。仓库只提供 [合成圆柱林输入](../artifacts/public/cylinder_forest/)：由平地和 12 根圆柱生成的 XYZ 点云、碰撞几何、场景和双机配置，约 2.7 MiB。真实林区 PCD、原始及模板 bag、覆盖文件、实测轨迹、日志和构建缓存均留在本地。Mid-360 模板 bag 需自行准备，默认放在 `~/bagfiles/`。
 
 ## 2. 环境与构建
 
@@ -86,25 +87,27 @@ bash Simulation/prepare_scene.sh --bag "$BAG" --output "$DATA"
 
 ## 4. 启动仿真
 
-使用上一节生成的场景，在同一终端按需选择一条命令：
+### 单机 PX4 SITL
+
+在项目根目录执行。从上一节取得 `DATA` 和 `BAG` 后，按需选择一个模式：
 
 ```bash
-bash Simulation/start.sh short --scene "$DATA/scene.json" --template-bag "$BAG"
-bash Simulation/start.sh small --scene "$DATA/scene.json" --template-bag "$BAG"
-bash Simulation/start.sh full  --scene "$DATA/scene.json" --template-bag "$BAG"
+SCENE="$DATA/scene.json"
+bash Simulation/start.sh short --scene "$SCENE" --template-bag "$BAG" # 起飞 + 场景首个目标，90 秒
+bash Simulation/start.sh small --scene "$SCENE" --template-bag "$BAG" # 六目标网格，180 秒
+bash Simulation/start.sh full  --scene "$SCENE" --template-bag "$BAG" # 15 点网格，600 秒
 ```
 
-换终端后，先将 `DATA` 和 `BAG` 设置为实际路径。脚本会自动加载 ROS、Livox 和项目环境。
-
-如果已经按默认路径准备好场景和 bag，可直接使用：
+当前本地 `003` 网格对齐场景的 `full` 启动命令（这些输入不随仓库提供）：
 
 ```bash
-bash Simulation/start.sh short # 起飞 + 场景第一个目标，时限 90 秒
-bash Simulation/start.sh small # 六目标网格，时限 180 秒
-bash Simulation/start.sh full  # 完整 15 点网格，时限 600 秒
+cd ~/workspace/mspace
+SCENE=artifacts/forest_lio/003_grid_aligned_20261116/scene.json
+BAG=artifacts/forest_lio/003_full_20261116/003_scan_template.bag
+bash Simulation/start.sh full --scene "$SCENE" --template-bag "$BAG" --speed 0.2
 ```
 
-默认场景为 `artifacts/forest_lio/route_125_155.json`，默认 bag 为 `~/bagfiles/yxb_20260208-104116.bag`。脚本检查这些文件，不会自动生成；不带模式参数启动等同于 `full`。
+换终端后重新设置 `SCENE` 和 `BAG`。脚本会自动加载 ROS、Livox 和项目环境。可在单机命令末尾加 `--dry-run` 检查输入，不启动进程。不传场景和 bag 时才使用默认路径 `artifacts/forest_lio/route_125_155.json` 和 `~/bagfiles/yxb_20260208-104116.bag`，缺失时不会自动生成；省略模式等同于 `full`。
 
 `full`、`small`、`short` 默认启用 `world-frame`，Python `px4 run --stage forest` 入口也默认开启；多机森林仿真始终使用该链路。起飞前等待坐标初始化就绪。`hover` 保持独立飞控测试，不启用 LIO 坐标适配。
 
@@ -121,23 +124,27 @@ bash Simulation/start.sh --help          # 查看全部选项
 
 `--scene`、`--template-bag` 可用于指定森林数据，`--speed` 调整倍速，`--output` 指定新的空输出目录。完整网格配置见 [grid_route.json](px4_forest/config/grid_route.json)。建议先通过短程和小网格，再运行完整任务。
 
-`test` 命令需要本地保留的 `tests/` 目录。测试文件已由 Git 忽略，不随仓库提供，新克隆的工作区不能直接运行完整历史测试；多机随代码提供的检查可用 `python3 Simulation/run.py px4 test` 单独运行。
+完整历史测试需要本地 `tests/` 目录；仓库随代码提供的 PX4 检查，可在加载 ROS 和项目环境后用 `python3 Simulation/run.py px4 test` 运行。
 
 ### 多机 PX4 SITL
 
-使用共享世界和配置列表，先双机，再通过追加飞机配置扩展：
+用上面设置的 `SCENE`、`BAG` 和仓库内的双机配置启动共享世界，再按需扩展机数：
 
 ```bash
 bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
-  --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)" --duration 600 --speed .25
+  --scene "$SCENE" --template-bag "$BAG" \
+  --output "artifacts/px4_forest/two_forest_$(date +%Y%m%d_%H%M%S)" --duration 600 --speed 0.25
 ```
 
-多机森林入口现在可追加 `--use-bridge`，使用实际 `swarm_conn_brige` 的 TCP 前驱链与 UDP 单机轨迹；不加开关继续 ROS 直连。每次运行自动分配各机端口，同机 UDP 按对端端口列表分发，端口写入 `manifest.json`。例如：
+加 `--use-bridge` 可使用 TCP 前驱链与 UDP 单机轨迹，不加则走 ROS 直连。每次运行的端口写入 `manifest.json`。
+
+不使用真实林区地图时，可改用仓库内的合成圆柱林做双机检查。仍需将 `BAG` 指向兼容的本地扫描模板：
 
 ```bash
-bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.json \
-  --use-bridge --duration 120 --speed .25 \
-  --output "artifacts/px4_forest/two_bridge_$(date +%Y%m%d_%H%M%S)"
+FIXTURE=artifacts/public/cylinder_forest
+bash Simulation/start.sh swarm --fleet "$FIXTURE/fleet.json" \
+  --scene "$FIXTURE/scene.json" --forest-geometry "$FIXTURE/geometry.json" \
+  --template-bag "$BAG" --output "artifacts/px4_forest/cylinder_$(date +%Y%m%d_%H%M%S)"
 ```
 
 `--use-bridge` 用于 forest 阶段；hover 不启动 EGO，传入该组合会报错。桥只承载轨迹，状态/readiness 等仍使用本次共享 ROS Master 下的话题。
@@ -146,7 +153,7 @@ bash Simulation/start.sh swarm --fleet Simulation/px4_forest/config/fleet_two.js
 
 ## 5. 查看结果
 
-当前仿真用的是独立的 41887 端口。查看仿真话题：
+单机 PX4 仿真固定使用本机 ROS Master `127.0.0.1:41887`；端口被占用时启动会报错，不会切换端口或停止占用进程。多机仿真仍自动分配端口，以本次输出目录 `manifest.json` 的 `ports.ros` 为准。在同一台机器的另一终端查看单机话题，无需另开 `roscore`：
 
 ```bash
 source ~/workspace/mspace/devel/setup.bash

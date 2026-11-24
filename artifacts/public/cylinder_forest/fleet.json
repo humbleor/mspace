@@ -1,0 +1,1 @@
+{"vehicles": [{"uav_id": 1, "instance": 20, "initial": [0, 0, 0, 0], "goals": [[2, 0, 1.5]]}, {"uav_id": 2, "instance": 21, "initial": [0, 4, 0, 0], "goals": [[2, 4, 1.5]]}]}
